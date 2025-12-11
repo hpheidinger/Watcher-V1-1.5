@@ -1,0 +1,22 @@
+# ----------------------------------------------------
+# - whitebots_map -
+#      WB Module
+#
+# See README-superfluous_map for detailed explanations.
+# ----------------------------------------------------
+# White list allowed Bots to request robots.txt
+# Note: must be checked before the superfluous_map
+AdsBot
+compatible;\ Googlebot/
+compatible;\ GoogleOther
+Googlebot-Image
+compatible;\ bingbot/
+compatible;\ GPTBot/
+# Other 'good ones' ...
+compatible;\ ClaudeBot
+DuckAssistBot/
+DuckDuckBot/
+DuckDuckBot-Https/
+compatible; DuckDuckGo-Favicons-Bot/
+compatible; OAI-SearchBot/
+

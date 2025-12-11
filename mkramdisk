@@ -1,0 +1,50 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+#------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+
+export WATCHER_MODE=startup	# Need watcher.conf for RAMdisk prep
+. system.conf
+. watcher.conf
+. common.conf
+. common.bashlib
+#------------------------
+
+#
+# Create a RAMdisk if available on the system
+#
+#### Prepare for RAMdisk
+
+if [ ! -d $POOL ]
+then mkdir -m 700 -p $POOL
+fi
+
+DISKMNT=`basename $POOL`
+
+if [ -z "$1" ]
+then RDNAME="`basename $MASTER_PATH`-ramdisk"
+else RDNAME="$1"
+fi
+
+if ! mount | grep $DISKMNT >/dev/null 2>&1
+then 	mount -t tmpfs -o size=$RDSIZE $RDNAME $DISKMNT
+#	TRUESIZE=`df -h | grep "$RDNAME" | awk '{print $2}'`
+	echo "Built ${RDSIZE^^} RAMdisk '$RDNAME' on mountpoint $DISKMNT"
+else	echo "$RDNAME on '$DISKMNT' already mounted"
+fi
+
+POOLMOUNT=$MASTER_PATH/$DISKMNT
+POOLBIN=$POOLMOUNT/bin
+
+echo ": RamDisk established `date --iso=seconds`
+RAMDISK=$RDNAME
+RDSIZE=$RDSIZE
+POOLMOUNT=$POOLMOUNT
+POOLBIN=$POOLBIN
+" > RAMDISK

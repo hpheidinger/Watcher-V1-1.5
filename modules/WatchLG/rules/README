@@ -1,0 +1,18 @@
+----------------------------------------------------------------------
+Do not provide a rule that is not at least checked for syntactical
+errors with the 'check-rule' or check-all-rules tool.
+----------------------------------------------------------------------
+
+Keep in mind, that if it is syntactically checked
+it does NOT mean, that it is logically working well.
+You need to check this from the results you get.
+See your trace-files in the module path.
+	tail -f Watch<XX>.trace
+or ...	Trace <XX>	
+
+Move unused/unwanted rules to a DISABLED directory to prevent
+these from being loaded 
+	mv XXX-blabla.rule DISABLED
+
+... or 'hide' the *.rule extention: i.e.:
+	mv XXX-blabla.rule XXX-blabla.rule-disabled

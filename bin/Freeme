@@ -1,0 +1,81 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+#################################################
+# - Freeme -
+# Trigger all modules to remove the specified
+# IP addr in $1
+# With no argument try to remove our own DYN-IP
+# address.
+#################################################
+#---------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../system.conf
+. ../common.conf
+. ../common.bashlib
+#---------------------------
+
+free_this_host() {
+local	funtag="[${FUNCNAME[0]}]"
+local	modules
+local	modnames
+local	mod
+
+	: echo $funtag
+	#
+	# Which modules are running?
+	#
+	modules=`ps -ef | grep -v grep | grep 'modules/Watch'`
+	modnames=`echo "$modules" | awk '{n=split($NF,parts,"/"); print parts[n]}'`
+
+	for mod in `echo $modnames`
+	do
+		#echo "Freehost: $1" >> $FIFO_BASE/$mod
+		case $mod in
+			WatchLG) logger -p authpriv.notice	"@Freehost: $1"
+			;;
+			WatchMX) logger -p mail.notice		"@Freehost: $1"
+			;;
+			WatchWB) logger -p local2.notice	"@Freehost: $1"
+		;;
+		esac
+	done
+}
+
+
+if [ ! -z "$1" ]
+then 	# User iput! Check if address is valid
+	validate_IP $1
+	if [ $? != 0 ]
+	then echo "Invalid IP address ... exiting"; exit
+	else HOST="$1"
+	fi
+else read HOST < $LOG_DIR/DYN_IP
+fi
+: echo "$HOST"
+
+free_this_host $HOST
+exit	# stop here for now ...
+
+#
+# Check whilelist as well ...
+#
+while read
+do
+	if [[ "/^[ \t]*[#]/" =~ "$REPLY" ]]; then continue; fi
+
+	HOST=`echo "$REPLY" | awk '
+	/^[ \t]*[#]+/	{ next } 
+			{print $1}
+	'`
+	if [ ! -z "$HOST" ]
+	then
+		: echo "-- $HOST --"
+		freehost $HOST
+	fi	
+done < $MASTER_PATH/whitelist

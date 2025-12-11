@@ -1,0 +1,89 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;   _DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT; _DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then           _TRACE=$1; shift; fi
+####################################################################
+# - Berserks, Master -
+# Get berserks from iptables; i.e. IPs with extreme packet counts
+# Call frequently by CRON
+####################################################################
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../system.conf
+. ../watchermap.conf
+. ../common.conf
+. ../common.bashlib
+#--------- API stuff --------
+. ../api/bash/$ME.bashlib
+#--------- Private stuff ----
+. ../conf/private/$ME.conf
+
+
+# Private: create o List of 
+mk-blackout() {
+local table=$1
+local hook_chain="PREROUTING"
+
+	iptables -t $1 -vxnL | grep 'match-set'	|\
+	awk	-v me=$ME			\
+		-v pool="$POOL"			\
+		-v loadfile=$LOADFILE		\
+		-v limit=$PACKET_LIMIT		\
+		-v targetset=$TARGET_IPSET	\
+	'
+		@include "words.awklib"
+		BEGIN	{
+			tmpfile= pool "/" me ".tmp"
+			print "TMP-File:",tmpfile
+		}
+		{
+			# Get packet counter
+			packets	= $1
+
+			if ( packets < limit ) next
+
+			# Pick 'word' after "match-set"
+			ipset	= word_after("match-set", $0)
+
+			print packets,ipset	> tmpfile
+		}	
+	'
+
+	# Make the xdp-Loadfile from IPs in IPSET exceeding the limits
+	ipset list $2 | grep '^[1-9]'| grep -v 'packets 0' | sort -V -k3,3 |\
+	awk	-v limit=$PACKET_LIMIT	\
+		-v me=$ME		\
+		-v pool="$POOL"		\
+		-v loadfile=$LOADFILE	\
+	'
+		{
+			if ( $3 > limit ) {
+				print $1 > loadfile
+			}
+		}
+	'
+}
+
+mk_bpf_map() {
+local ftag="[${FUNCNAME[0]}]"
+	# < CODE HERE >
+}
+
+_usage() {
+	echo "Usage: $ME <ipset name>"
+	exit
+}
+
+#========================
+# Main execution
+#========================
+# Must provide a target IPset in $1
+
+[ -z "$1" ] && _usage
+TARGET_IPSET=$1
+
+mk-blackout raw $TARGET_IPSET
+mk_bpf_map
+

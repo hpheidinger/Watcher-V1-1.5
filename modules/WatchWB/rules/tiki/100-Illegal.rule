@@ -1,0 +1,9 @@
+WEB_CLASS="Burglar"
+#######################
+
+# Explicit call to tiki-register forbidden!
+RULE=Illegal-register
+Pattern='GET /tiki-register.php'
+#--------- Decision -----------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject; return $?; fi
+

@@ -1,0 +1,24 @@
+# - words.awklib -
+# Trigger on word matches
+
+# word-based "poor man's grep"
+function word_match () {
+	print "[word_match()] __ Not yet implemented __"
+}
+
+# Extracts the word immediately following a given pattern
+# i.e. <pattern><whitespace><word>
+function word_after(pat, line, tmp) {
+	return match(line, pat "[[:space:]]+([^[:space:]]+)", tmp) ? tmp[1] : "" 
+}
+
+# Extracts the word immediately preceding a given pattern
+# i.e. <word><whitespace><pattern>
+function word_before(pat, line,   tmp) {
+	if (match(line, "([^[:space:]]+)[[:space:]]+" pat, tmp))
+        	return tmp[1]
+	return ""
+}
+
+
+# vim: set filetype=awk noexpandtab tabstop=8 shiftwidth=8 autoindent smartindent :

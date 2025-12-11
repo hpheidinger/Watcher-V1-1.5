@@ -1,0 +1,182 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+############################################################
+# Part of Watcher
+# - TidyDB -
+#
+# Tidy up a production DB with a fresh rendition generated
+# from recent Schema.sql
+# 
+############################################################
+#------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../system.conf
+. ../watchermap.conf
+. ../common.conf
+. ../common.bashlib
+#--- Private stuff ------
+. ../api/bash/$ME.bashlib	# pick our private code
+. ../conf/private/$ME.conf	# pick our private configuration
+
+trap cleanup 0 1 2 9 15
+
+cleanup() {
+local funtag="[${FUNCNAME[0]}]"
+local	keep=5
+
+	if [ -e $DBFILE-inter ]
+	then 	echo "$funtag Removing intermediate file"
+		rm -f $DBFILE-inter
+	fi
+
+	# Remove old backups, keep only latest $keep
+	ls -t "$DBFILE"-* 2>/dev/null | tail -n +$(($keep + 1)) | xargs rm -f 2>/dev/null
+}
+
+_usage() {
+local funtag="[${FUNCNAME[0]}]"	
+local	choices="LG, MX, WB or GE (for GeoTrack) ..."
+
+	echo "Usage: $ME <module token>"
+ 	echo "Specify which module to access: $choices"
+	exit 1
+}
+
+switch2work() {
+local funtag="[${FUNCNAME[0]}]"
+	echo "$funtqg"
+	[ -d "$WORKDIR" ] || mkdir "$WORKDIR"
+	cd "$WORKDIR"
+}
+
+# Pick recent DB schema and current DB from production 
+pick_production() {
+local funtag="[${FUNCNAME[0]}]"
+local	spot where_dir where_mother
+
+	# Are we in $WORKDIR ?? Bail out if NOT!
+	spot=`realpath .`
+	where_dir=`basename $spot`
+	where_mother=`dirname $spot`
+
+	if [ "$where_mother" != "`Module $MODTOKEN`" ]
+	then	echo "$funtag Wrong target dir"
+	       	((plausibility--)); return 1
+	else	echo "$funtag In positiion: $spot"
+	fi	
+
+	if [ -e ../Schema.sql ]
+	then	ln -sf ../Schema.sql Schema.sql
+	else	echo "$funtag No Schema.sql in `Module $MODTOKEN`"
+		((plausibility--)); return 1
+	fi	
+
+	# Make a local copy from DBFILE from production above us
+	if [ -e ../$DBFILE ]
+	then	echo "$funtag Creating a safe copy of the database..."
+		if [ -e $DBFILE ]; then mv $DBFILE $BACKUP; fi
+		sqlite3 ../$DBFILE "VACUUM INTO './$DBFILE'"
+	else	echo "$funtag Eeeek! database $DBFILE missing"
+		((plausibility--)); return 1
+	fi
+}	
+
+### New for the Module token jumper ...
+# Stolen from the 'Procrate' tool
+if [ -z "$1" ]
+then	_usage
+else	MODTOKEN=${1^^}
+fi
+
+case $MODTOKEN in
+	LG|MX|WB)	DBNAME="${module_db_map[$MODTOKEN]}" ;;
+	GE*)		DBNAME="${module_db_map[$MODTOKEN]}" ;;
+	*)		echo "Illegal module token: '$MODTOKEN'"
+			_usage
+;;
+esac
+
+### Got all parameters - now make  the internal configuration
+# Set DBFILE once and for ever ...
+TIMESTAMP=$(date +%Y-%m-%dT%H:%M:%S)
+DBFILE=$DBNAME.db 
+
+# Declare workfiles ...
+BACKUP="$DBFILE-$TIMESTAMP"
+INTERMEDIATE="$DBFILE-inter"
+NEW_DB="$DBFILE-new"
+### End: Internal configuration
+
+### Testing/Debug
+# Go to production dir of scanner module
+cd `Module $MODTOKEN`
+echo "In `realpath .` now"
+
+if [ ! -e "Schema.sql" ]
+then 	echo "$ME: No 'Schema,sql' for $MODTOKEN module in $(pwd)"
+	echo "Bailing out ..."
+	exit
+fi	
+
+plausibility=0
+switch2work
+pick_production
+
+# Checing for plausibility ...
+if [ $plausibility -lt 0 ]
+then	echo "Inplaubsible situation - bailing out ..."
+	exit
+fi
+
+# Emergeny stop during testing
+#echo "««« Testing break »»»: Selected DB is $DBNAME"
+#exit
+
+#### Note ####
+#### From here on nearly all is the same than with 'tidyDB'
+#### or should be at least
+
+# -------- Main -----------------
+# Move original DB to the backup (this way we never overwrite it!)
+echo "Creating backup: $BACKUP"
+mv "$DBFILE" "$BACKUP"
+
+# Create an intermediate working copy
+echo "Creating intermediate database: $INTERMEDIATE"
+#cp "$BACKUP" "$INTERMEDIATE"
+sqlite3 "$BACKUP" ".clone $INTERMEDIATE"
+
+# Create a new empty database from the schema
+echo "Creating new database with schema: $NEW_DB"
+sqlite3 "$NEW_DB" < Schema.sql
+if [ $? -ne 0 ]
+then 	echo "Creation of $NEW_DB failed - Bailing out!"
+	exit 1
+fi	
+
+fix_inter	# Adjust the intermediate DB where needed
+
+# Transfer data from the intermediate DB to the new DB
+echo "Transferring data from intermediate DB to new DB..."
+#sqlite3 "$INTERMEDIATE" .dump | sqlite3 "$NEW_DB" ### Junk!!!
+shuffle $INTERMEDIATE $NEW_DB
+
+echo "Database migration completed successfully!"
+
+# Check sanity of worked-out DB
+sanity-check;  SANITY=$?
+
+if [ $SANITY -eq 0 ]
+then	echo "Providing cleaned rendition of original database"
+	mv $DBFILE-new ..
+echo	"Sanity errors: $SANITY"
+fi
+
+exit
+

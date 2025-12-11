@@ -1,0 +1,81 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+# - Expire -
+# Module LG
+#------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../../system.conf
+. ../../common.conf
+. ../../common.bashlib
+#------------------------
+. WatchLG.conf
+
+trap cleanup	0 1 2 9 15
+
+cleanup() {
+        if [ -n "$PUB_PATH" ]
+        then 	if [ ! -d "$PUB_PATH" ]
+		then 	mkdir "$PUB_PATH"
+			chown apache:apache "$PUB_PATH"
+		fi
+		cp $DB $PUB_PATH
+        fi
+
+        logger "$ME[$$] Cleaned $counter bandits from DB older than $EXPIRE days"
+}
+
+
+
+# -------------- Main ------------
+if [ -z "$1" ]
+then	EXPIRE=$EXPIRATIONDAYS
+else	EXPIRE=$1
+fi
+
+logger "$ME[$$] Expiration of bandits older than $EXPIRE days"
+
+CANDIDATES=`$SQL "select count(IP) from $TABLE 
+		where  (julianday('now') - julianday(date_event)) > $EXPIRE;"`
+
+if [ $CANDIDATES -eq 0 ]
+then
+	logger	"$ME[$$] No candidates for expiration ..."
+	exit
+else	
+	logger	"$ME[$$] Candidates for expiration: $CANDIDATES"
+fi
+
+echo "Candidates      : $CANDIDATES"
+echo "Expiration days : $EXPIRE"
+
+BANDITS=`$SQL "select IP from $TABLE 
+		where  (julianday('now') - julianday(date_event)) > $EXPIRE;"`
+
+#
+# First strip the database ...
+#
+$SQL "delete from $TABLE 
+	where (julianday('now') - julianday(date_event)) > $EXPIRE;"
+
+$SQL "delete from affairs_by_ip
+	where (julianday('now') - julianday(event_date)) > $EXPIRE;"
+
+$SQL "Vacuum main;"	
+
+#
+# Cleanup firewall from expired DROPs
+#
+counter=0
+for h in `echo $BANDITS`
+do
+	((counter++))
+	$IPSET -exist del $MYSET $h
+	$IPSET -exist del custody $h
+done
+

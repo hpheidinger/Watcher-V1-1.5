@@ -1,0 +1,33 @@
+# ---------------------------------------------------
+# - superfluous_map -
+# Module MB
+#
+# This file is used to create a 
+#    'grep -E"entry1|entry2|entry3|...|entryN"' line.
+#
+# Do NOT append comments to lines with entries!
+# Take care that there are no trailing spaces.
+# Special characters to regex must be quoted;
+# e.g. brackets
+# ---------------------------------------------------
+# You may comment as you like in column 1
+	# or even indented with spaces and tabs
+# ---------------------------------------------------
+SELF-TEST
+postgrey\[
+postfix/anvil\[
+postfix/cleanup\[
+postfix/lmtp\[
+postfix/pipe\[
+postfix/pickup\[
+postfix/qmgr\[
+postfix/scache\[
+\ spamd\[
+\ opendkim\[
+\ opendmarc\[
+: statistics:
+: timeout
+: lost connection
+: disconnect from
+: SASL authentication failure:
+: xsasl_cyrus_server_create:

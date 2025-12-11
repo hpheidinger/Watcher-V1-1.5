@@ -1,0 +1,93 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;         _DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;       _DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then                 _TRACE=$1; shift; fi
+####################################################################
+########################################################
+# - SetDebug -
+# Switch a running module to DEBUG or TRACE mode
+########################################################
+#------------------------
+REALPATH=$(realpath "$0")
+WHERE=$(dirname "$REALPATH")
+ME=$(basename "$REALPATH")
+cd "$WHERE"
+
+#---- Core stuff ----------
+. ../system.conf
+. ../watchermap.conf
+. ../common.conf
+. ../common.bashlib
+#---- Private stuff ----------
+. ../conf/private/$ME.conf
+. ../api/bash/$ME.bashlib
+
+choices() {
+	echo "LG,MX,MB,WB or GE (for GeoTrack)"
+}
+
+usage() {
+	echo "
+	Usage: $ME [-d <switch>] [-D <switch>] [-t <switch>] [-x] <module token>
+		-d ... Set 'debug'  ; Debug level 1
+		-D ... Set 'debug2' ; Debug level 2 includes function tracking
+		-t ... Set 'trace'  ; Tracing
+		-x ... Set 'alloff' ; All debuging and tracing modes 'off'
+		<switch>	can be one of:	'0/off' .. or .. '1/on'
+		<module token>	can be one of:	$(choices)
+	"
+	exit 1
+}
+
+
+# Check if there were arguments at all 
+if [[ $# -lt 1 ]]
+then usage
+fi
+
+# Optionen parsen
+while getopts "d:D:t:x" opt
+do
+	case "$opt" in
+		d)	if	[[ "$OPTARG" =~ ^(on|ON|1)$	]]; then DEBUG_CMD="@debug"
+			elif	[[ "$OPTARG" =~ ^(off|OFF|0)$	]]; then DEBUG_CMD="@nodebug"; fi ;;
+		D)	if	[[ "$OPTARG" =~ ^(on|ON|1)$	]]; then DEBUG_CMD="@debug2"
+			elif	[[ "$OPTARG" =~ ^(off|OFF|0)$	]]; then DEBUG_CMD="@nodebug"; fi ;;
+		t)	if	[[ "$OPTARG" =~ ^(on|ON|1)$	]]; then DEBUG_CMD="@trace"
+			elif	[[ "$OPTARG" =~ ^(off|OFF|0)$	]]; then DEBUG_CMD="@notrace"; fi ;;
+		x)	DEBUG_CMD="@alloff" ;;  # Turn everthing 'off'
+		*)	echo "Invalid Option!"
+			usage
+	;;
+	esac
+done
+
+# modul token isthe last argument on commend line
+shift $((OPTIND - 1))  	# Remove all options from argument list
+TOKEN="${1^^}"  	# Pick the token (remaining parameter)
+
+# Check, if a token is present at all
+if [[ -z "$TOKEN" ]]
+then 	echo "Missing module token!"
+	usage
+fi
+
+# Set FIFO from token
+case "$TOKEN" in
+	LG|MB|MX|WB)	PIPE="$FIFO_BASE/Watch$TOKEN"	;;
+	GE*)		PIPE="$FIFO_BASE/GeoTrack"	;;
+	*)		echo "Illegal module token: '$TOKEN'"
+			usage
+;;
+esac
+
+# Punch to FIFO ...
+if [[ -n "$DEBUG_CMD" ]]
+then
+	echo "$DEBUG_CMD $FAKE_IP $FAKE_INSTANCE"
+	echo "$DEBUG_CMD $FAKE_IP $FAKE_INSTANCE" > $PIPE
+	echo "Punched: $DEBUG_CMD to $PIPE"
+else
+	echo "Not a valid debug option!"
+	exit 1
+fi

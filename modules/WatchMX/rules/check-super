@@ -1,0 +1,32 @@
+#!/bin/bash
+#
+# - check-super -
+# Check the superfluous_map file for syntactical errors
+#
+BASE=`Masterpath`
+FILE=superfluous_map
+
+SUPERFLUOUS=`awk '
+		/^[ \t]*#/	{next}
+		/^$/		{next}
+				{print; str=str $0 "|"}
+		END { gsub(/[|]$/,"",str); print str }
+		' $FILE`
+
+echo "'$SUPERFLUOUS'"
+
+if [[ -z "$1" ]]
+then TESTSTRING="SELF-TEST" 
+else TESTSTRING="$1"
+fi
+
+MATCH=`grep -oE "$SUPERFLUOUS" <<< "$TESTSTRING"`
+result=$?
+
+echo "RET code: "$result
+case $result in
+	0) echo "Matched »» '$TESTSTRING' as '$MATCH'"	;;
+	1) echo "No Match found"			;;
+	2) echo "Syntax error in $FILE"		;;
+esac
+

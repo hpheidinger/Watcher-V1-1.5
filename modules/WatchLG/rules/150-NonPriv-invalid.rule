@@ -1,0 +1,16 @@
+RULE="NonPriv-login-pwd"
+Pattern=': Failed password for invalid user'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject; return $?; fi
+
+RULE="NonPriv-login-none"
+Pattern=': Failed none for invalid user'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject; return $?; fi
+
+
+RULE="Invalid-user"
+Pattern=': Invalid user'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject; return $?; fi
+

@@ -1,0 +1,57 @@
+# - Watcher-Stats.bashlib -
+
+# Watcher-Stats API main wrapper
+# Rope ladder for the tasks to do
+report_stats() {
+local funtag="[${FUNCNAME[0]}]"
+
+	report_filter
+	report_raw
+	report_types
+	# ... and anything else
+}
+
+report_raw() {
+local funtag="[${FUNCNAME[0]}]"
+
+}
+
+report_filter() {
+local funtag="[${FUNCNAME[0]}]"
+
+}
+
+report_types () {
+local funtag="[${FUNCNAME[0]}]"
+local	types="Login Mail Mailbox Web WBanalyse"
+
+	echo "[ Members in firewall ]" 
+	for t in $types
+	do printf "%10s: %9d\n" "$t" $(count-by-type $t)
+	done
+}
+
+
+#+
+# Helper functions
+#-
+
+members-by-type() {
+# $1	type	
+local funtag="[${FUNCNAME[0]}]"
+
+	ipset list | grep '^[1-9]' | grep -i ",$1,"
+}
+
+count-by-type() {
+# $1	type	
+local funtag="[${FUNCNAME[0]}]"
+
+	members-by-type $1 | wc -l
+}
+
+
+
+
+
+# vim: set filetype=sh noexpandtab tabstop=8 shiftwidth=8 autoindent smartindent :

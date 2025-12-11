@@ -1,0 +1,105 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+PROC_START=`date +%s%N`
+#
+# Plug NIXSpam lists dynamically into firewall ...
+#
+# OBSOLETE ... nixspam closed doors JAN-2024
+#--------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../../system.conf
+. ../../common.conf
+. ../../common.bashlib
+#--------------------------
+. $ME.conf
+
+trap cleanup 0 1 2 9 15
+cleanup() {
+	rm -f $BLACKMATCHES
+	mv $DROPLIST ./DROPLIST
+	PROC_END=`date +%s%N`
+	PROC_TIME=`echo "scale=3; ($PROC_END - $PROC_START)/10^6" | bc`
+	logger "$ME[$$] Finished ... $PROC_TIME ms"
+	printf  " » %-15s ... finished in %8.2f ms\n" $ME $PROC_TIME
+}
+
+NIX2FW() {
+local	have_it
+
+	awk  -v setname=$MYSET -v settyp="$SETTYP" -v setopts="$SETOPTS" -v loadfile=$2 '
+	BEGIN   { SUFFIX="comment \"nixspam\"" }
+		{ arr[$1]=$1 }
+	END {
+		printf "-exist create %s %s %s\n", setname, settyp, setopts > loadfile
+		for (addr in arr) {
+			printf "add %s %s %s\n", setname, addr, SUFFIX >> loadfile
+		}
+	}
+        ' $1
+
+	have_it=`$IPSET -n list | grep $MYSET`
+
+	if [ -z "$have_it" ]
+	then	mk-ipset $MYSET "$SETTYP" "$SETOPTS"
+	fi
+
+	$IPSET flush $MYSET
+	$IPSET -file $LOADFILE restore
+	logger "$ME[$$] IPSET $MYSET loaded from loadfile $LOADFILE"
+}
+
+#------------------ main ---------------------------------
+logger "$ME[$$] Starting ..."
+
+LOADER=$ME
+LOADFILE=$POOL/ipset.Loadfile-$LOADER
+DROPLIST=$POOL/DROPLIST-$LOADER
+BLACKMATCHES=$POOL/nixspam.blackmatches
+
+> $LOADFILE
+> $DROPLIST
+# Remove old spammer lists ...
+# Old ... failing since Sep-2021
+#rm -f nixspam.blackmatches*
+#wget -T 5 -t 1 -q http://www.heise.de/ix/nixspam/nixspam.blackmatches
+
+# Have a nixspam dump file?
+# (Cannot have one on first call!)
+if [ -f $DUMPFILE ]
+then OLD_DATE=`date --iso=seconds -r $DUMPFILE`
+else OLD_DATE=
+fi
+
+wget -N $WGETOPTS $DUMPURL/$DUMPFILE
+
+if [ -f $DUMPFILE ]
+then	zcat $DUMPFILE > $BLACKMATCHES
+else	logger	"$ME[$$] Failed downloading NixSpam dump"
+	exit
+fi
+
+NEW_DATE=`date --iso=seconds -r $DUMPFILE`
+
+if [ "$OLD_DATE" == "$NEW_DATE" ]
+then	logger "$ME[$$] No change in NixSpam dump ... skipping"
+	exit
+fi
+
+# Ok .. have a dump file and it changed
+# Make a clean droplist; i.e. just the ip addresses
+# with this silly '...' lines removed
+awk '
+/[.]{3}/	{ next }
+		{ arr[$2]=$2 }
+END {
+	for ( a in arr ) { print a }
+}
+' $BLACKMATCHES | sort -V > $DROPLIST
+
+NIX2FW $DROPLIST $LOADFILE

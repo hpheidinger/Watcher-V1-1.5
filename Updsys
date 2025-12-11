@@ -1,0 +1,8 @@
+#!/bin/bash
+# Update systen.conf after system updates/upgrades
+versionid=`grep '^VERSION_ID=' /etc/os-release | tr -d "\"" | cut -f2 -d"="`
+target=SYSVERS
+
+# echo $versionid
+# set -x
+eval sed -i "s/^$target=.*/$target='$versionid'/" system.conf

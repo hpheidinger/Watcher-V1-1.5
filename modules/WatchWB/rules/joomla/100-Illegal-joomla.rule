@@ -1,0 +1,63 @@
+#
+# Illegal request to a JOOLA instance; i.e. stuff that just
+# does not exist in a JOOMLA instance. This indicates
+# 'trial balloons' as attempts to explore the instance
+# e.g. "GET /wp-login.php" to a Joomla instance
+#
+WEB_CLASS=Illegal-joomla
+###############################
+
+RULE=BREAK-junk-1
+Pattern="GET /option=com_user"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 4; return $?; fi
+
+RULE=BREAK-junk-3
+Pattern="GET /index.php?option=com_user"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 4; return $?; fi
+
+RULE=BREAK-junk-4
+Pattern="GET /shop/user/edit"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 4; return $?; fi
+
+RULE=BREAK-junk-11
+Pattern="?option=com_easyblog"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 4; return $?; fi
+
+RULE=BREAK-junk-12
+Pattern="GET /users"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 4; return $?; fi
+
+RULE=BREAK-junk-13
+Pattern="GET /public"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 4; return $?; fi
+
+RULE=BREAK-junk-14
+Pattern="GET /en/anmeldung/"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 4; return $?; fi
+
+# There is no '/component/' in JOOMLA ... it's '/components/'
+RULE=BREAK-junk-15
+Pattern=" /component/"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 5; return $?; fi
+
+# There is no ' /anmeldung' in JOOMLA ... JOOMLA speaks English
+RULE=BREAK-junk-16
+Pattern=" /anmeldung/"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 5; return $?; fi
+
+# There is no ' /products/ in JOOMLA ... JOOMLA speaks English
+# i5t must be /en/products/  on English pages
+RULE=missing_language
+Pattern=" /products/"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+

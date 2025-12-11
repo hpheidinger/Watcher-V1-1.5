@@ -1,0 +1,31 @@
+# - 001-Ignore.rule -
+# Special ruleset to suppress UNTREATED logs
+# i.e. it does NOT call 'inject' and simply 
+# returns exit code 254 to the post processor
+#
+# Alternative to an entry in the module's superfluous_map file
+RULE="Ignore-SSH-DH-mismatch" 
+Pattern=': invalid public DH value:'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then return 254; fi
+
+RULE="Received_by" 
+Pattern=' Received: by '
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then return 254; fi
+
+RULE="Received_from" 
+Pattern=' Received: from '
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then return 254; fi
+
+RULE="MSG_ID" 
+Pattern=': message-id=<'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then return 254; fi
+
+RULE="Legal_transfer" 
+Pattern=': client='
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then return 254; fi
+

@@ -1,0 +1,5 @@
+RULE="NonPriv-failed-existing"
+Pattern=': Failed password for'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject; return $?; fi
+

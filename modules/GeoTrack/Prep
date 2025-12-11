@@ -1,0 +1,39 @@
+#!/bin/bash
+#------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+#------------------------
+. GeoTrack.conf
+
+#
+# Check if we have sqlite3 on the system
+#
+SQLITE3=`which sqlite3`
+
+if [ -z $SQLITE3 ]
+then
+        echo "No 'sqlite3' found on the system"
+        echo "Module $MODULE needs sqlite3 to maintain its database"
+        echo "Install 'sqlite3' for your system and start $WHERE/$ME again"
+	echo "Exiting ..."
+        exit 0
+fi
+
+
+if [ -f $DB ]
+then
+	echo "CAUTION:"
+	echo "Database '$DB' already exists."
+	echo "If you really want to start-over with a blank database"
+	echo "remove the database manualy. (rm $DB)"
+	echo "Then start ./$ME in $WHERE again"
+	echo
+else
+	$SQL < geotrack.sql	# the GeoTrach schema file
+	$SQL < geocount.sql
+	echo "Database '$DB' initialized ..."
+fi
+
+./mk_iso3166

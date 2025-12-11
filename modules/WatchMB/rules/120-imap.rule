@@ -1,0 +1,5 @@
+RULE=IMAP-break-in
+Pattern="Error:[imap]"
+#-------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject; return $?; fi
+

@@ -1,0 +1,182 @@
+# - TidyDB.bashlib -
+#--------------------------------------------------
+
+# Fix intermediate file
+# i.e. add missing coloums to tables found in the NEW 'Schema.sql'
+# but not yet in the intermediate DB
+fix_inter() {
+local funtag="[${FUNCNAME[0]}]"
+
+	echo ">>$funtag"
+	echo "Checking and adding missing columns in the intermediate database..."
+
+	# Pick all relevant tables of the new DB	 
+	NEW_TABLES=$(sqlite3 "$NEW_DB" ".tables")
+    
+	for TABLE in $NEW_TABLES
+	do
+		echo "Processing table: $TABLE"
+        
+		# Select existing columns in the intermediate DB
+		COLUMNS_OLD=$(sqlite3 "$INTERMEDIATE" "PRAGMA table_info($TABLE);" | awk -F'|' '{print $2}')
+
+		# Get columns of the new DB
+		COLUMNS_NEW=$(sqlite3 "$NEW_DB" "PRAGMA table_info($TABLE);" | awk -F'|' '{print $2}')
+        
+		# Add missing columns to the intermediate DB
+		for COL in $COLUMNS_NEW
+		do
+			if ! echo "$COLUMNS_OLD" | grep -q "^$COL$"
+			then
+				# Get column type in the new DB
+                		COL_TYPE=$(sqlite3 "$NEW_DB" "PRAGMA table_info($TABLE);" | grep -w "$COL" | awk -F'|' '{print $3}')
+                		echo "Adding missing column '$COL' (type: $COL_TYPE) to table '$TABLE' in intermediate database..."
+                		sqlite3 "$INTERMEDIATE" "ALTER TABLE $TABLE ADD COLUMN $COL $COL_TYPE;"
+			fi
+		done
+	done
+}
+
+#
+# Pull data from old DB to new DB
+# Only existing tables in the new DB are relevant!
+# Tables that are not in the new DB are silently ignored
+#
+shuffle() {
+local funtag="[${FUNCNAME[0]}]"
+local	SOURCE_DB=$1
+local	NEW_DB=$2
+local	COLUMNS TABLE_EXISTS
+local	TABLES
+
+	echo ">>$funtag  $SOURCE_DB ––→ $NEW_DB"
+
+	# Hole Tabellenliste **nur aus der neuen DB**
+	TABLES=$(sqlite3 "$NEW_DB" "
+		SELECT name FROM sqlite_master 
+		WHERE type='table' 
+		AND name NOT LIKE 'sqlite_%';")
+
+	for TABLE in $TABLES; do
+		echo "Processing table: $TABLE"
+
+		# Prüfe, ob die Tabelle in der alten DB existiert
+		# Check if table exists in old DB
+		TABLE_EXISTS=$(sqlite3 "$SOURCE_DB" "
+			SELECT name FROM sqlite_master 
+			WHERE	type ='table' 
+			AND	name = '$TABLE';")
+
+		if [[ -n "$TABLE_EXISTS" ]]
+		then
+			echo "Transferring data from table '$TABLE'..."
+
+			# Get column order straight from SQlite
+			COLUMNS=$(sqlite3 "$NEW_DB" "
+				PRAGMA table_info($TABLE);" 	| 
+				cut -d'|' -f2 			| 
+				tr '\n' ',' 			|
+				sed 's/,$//')
+
+			sqlite3 "$NEW_DB" <<-EOF
+				ATTACH DATABASE '$SOURCE_DB' AS old_db;
+				INSERT OR IGNORE INTO $TABLE ($COLUMNS)
+				SELECT $COLUMNS FROM old_db.$TABLE;
+				DETACH DATABASE old_db;
+			EOF
+
+			echo "Data transfer for table '$TABLE' complete!"
+		else
+			echo "Skipping table '$TABLE' (not in old DB)."
+		fi
+	done
+}
+
+sanity-check() {
+local funtag="[${FUNCNAME[0]}]"
+local	mismatches=0
+local	errors=0
+local	size schema
+local	tables_new tables_inter
+local	count_new count_inter
+
+	#########################################
+	#»» File level checks ...
+	#########################################
+
+	# Check if new DB exists
+	[ -e "$DBFILE-new" ] || { echo "$funtag ERROR: $DBFILE-new does not exist!"; return 1; }
+
+	# Check if DB size is non-zero
+	size=$(ls -s "$DBFILE-new" | awk '{ print $1 }')
+	if [ $size -eq 0 ]
+	then
+		echo "$funtag DB file $DBFILE-new is empty";
+		return 1
+	fi
+
+	#########################################
+	#»» Consistency checks ...
+	#########################################
+
+	# Check schema exists
+	schema=$(sqlite3 "$DBFILE-new" ".schema")
+	if [ -z "$schema" ]
+	then
+		echo "$funtag DB file $DBFILE-new has no schema";
+		return 2
+	fi
+
+	# Check DB integrity
+	if ! sqlite3 "$DBFILE-new" "PRAGMA integrity_check;" | grep -q "ok"
+	then
+		echo "$funtag ERROR: Integrity check failed for $DBFILE-new!";
+		return 2
+	else
+		echo "Integrity check o.k. for $DBFILE-new!"
+	fi
+
+	# Get tables in new DB
+	tables_new=$(sqlite3 "$DBFILE-new" "SELECT name FROM sqlite_master WHERE type='table';")
+
+	# Check row counts (basic sanity)
+	for table in $tables_new
+	do
+		if [ "$table" = 'sqlite_sequence' ]; then continue; fi
+
+		count_new=$(sqlite3 "$DBFILE-new" "SELECT COUNT(*) FROM $table;")
+		count_inter=$(sqlite3 "$DBFILE-inter" "SELECT COUNT(*) FROM $table;")
+
+		# Check if row counts match
+		if [ $count_new -lt $count_inter ]
+		then
+			echo "$funtag WARNING: Table '$table' has fewer rows in $DBFILE-new than in $DBFILE-inter!"
+			echo "$DBFILE-new    $count_new"
+			echo "$DBFILE-inter  $count_inter"
+			((mismatches++))
+		fi
+	done
+
+	# If there are any mismatches, we fail
+	[ $mismatches -gt 0 ] && return 3
+
+	# Check schema consistency: compare columns, indexes, etc.
+	echo "Comparing schema structure..."
+	for table in $tables_new
+	do
+		columns_new=$(sqlite3 "$DBFILE-new" "PRAGMA table_info($table);")
+		columns_inter=$(sqlite3 "$DBFILE-inter" "PRAGMA table_info($table);")
+		if [ "$columns_new" != "$columns_inter" ]; then
+			echo "$funtag WARNING: Table '$table' schema mismatch between $DBFILE-new and $DBFILE-inter!"
+			((errors++))
+		fi
+	done
+
+	# If there are any schema mismatches, we fail
+	[ $errors -gt 0 ] && return 4
+
+	echo "$funtag $DBFILE-new passed sanity check."
+	return 0
+}
+
+# vim: set filetype=sh noexpandtab tabstop=8 shiftwidth=8 autoindent smartindent :

@@ -1,0 +1,242 @@
+##============================================================
+# - api/bash/sql.bashlib -
+# Function library for database handling
+#=============================================================
+# Common SQL procedures and global variables 
+# shared by all modules
+# Might be included into Watcher tools with database access
+#=============================================================
+#===	... Do NOT change anything below ...		======
+#=============================================================
+declare -A	sql_track
+declare -A	resultset
+
+sql_trace() {
+local funtag="[${FUNCNAME[0]}]"
+local	parms="$*"
+
+        if [ -n "$SQL_TRACE" ]
+        then 	echo "$(date +%Y-%m-%dT%T.%3N) $ME[$$]: $parms" >> $ME.sql_trace
+        fi
+}
+
+# Create a table with the module's configuration data
+# $1	The database name from module
+config_table() {
+local funtag="[${FUNCNAME[0]}]"
+local	table=`cut -f1 -d"." <<< "$1"`
+
+	$SQL "drop table if exists config;"
+	$SQL "CREATE TABLE config (
+		key	TEXT PRIMARY KEY,
+		value	TEXT
+	);"
+
+	# Insert configuration data into config table
+	$SQL "INSERT INTO config (key, value) VALUES
+		('my_path',	'$WHERE'),
+		('my_db',	'$DB'),
+		('max_affairs', '$MAX_AFFAIRS');"
+
+	### Define the triggers to drop entries exceeding max_affairs
+	
+	# Define the trigger for INSERT
+	$SQL	"DROP TRIGGER IF EXISTS drop_on_insert;"
+	$SQL	"CREATE TRIGGER drop_on_insert
+			AFTER INSERT ON $table
+			FOR EACH ROW
+			WHEN	NEW.affairs >= CAST((SELECT value FROM config 
+			WHERE	key = 'max_affairs') AS INTEGER)
+			BEGIN
+				UPDATE $table SET
+					state	= 'DROP'
+				WHERE	IP	= NEW.IP;
+			END;"
+
+	# Define the trigger for UPDATE
+	$SQL	"DROP TRIGGER IF EXISTS drop_on_update;"
+	$SQL	"CREATE TRIGGER drop_on_update
+			AFTER UPDATE ON $table
+			FOR EACH ROW
+			WHEN	NEW.affairs >= CAST((SELECT value FROM config 
+			WHERE	key = 'max_affairs') AS INTEGER)
+			BEGIN
+				UPDATE $table SET
+					state	= 'DROP'
+				WHERE	IP	= NEW.IP;
+			END;"
+}
+
+
+#
+# Parse SQL resultset (global) from a SELECT into array
+#
+parse_resultset() {
+# $1	map from exec_sql
+local funtag="[${FUNCNAME[0]}]"
+local -n par_map=$1
+local	query=${par_map[cmd]}
+local	data=${par_map[data]}
+local	columns
+local	i=0
+
+	sql_trace "$funtag »»»»»» Start parsing resultset »»»»»»"
+	sql_trace "$funtag Data : '$data'"
+
+	# Extract coloumn names from a 'SELECT ...'
+	columns=$(
+	awk '
+	BEGIN 	{ IGNORECASE=1 } 
+		{
+			sub(/.*select[ \t]+/, "")
+			sub(/[ \t]+from.*/, "")
+			gsub(/,/, " ")
+			print
+		}' <<< $(echo $query)	# Make it a one-liner for AWK's benefit
+	)
+
+	sql_trace "$funtag Resultset columns: '$columns'"
+
+	# Parse resultset into array
+	IFS="|" read -r -a values <<< "$data"
+
+	# Store values into global array 'resultset'
+	for col in $columns
+	do	resultset["$col"]="${values[i]}"
+        	((i++))
+	done
+
+	[ -n "$_DEBUG" ] && dump_resultset
+		
+	sql_trace "$funtag «««««« Finished parsing resultset ««««««"
+}
+
+
+dump_resultset() {
+local funtag="[${FUNCNAME[0]}]"
+local	line
+
+	sql_trace "$funtag Dumping resultset ..."
+	# Traverse and view entire the global resultset array
+	for col in "${!resultset[@]}"
+	do	line=$( printf "%-20s | %-s" "$col" "${resultset[$col]}" )
+		sql_trace "$funtag $line"
+	done
+	sql_trace "$funtag Finished dumping resultset"
+}
+
+
+#
+### Execute SQL statement and check plausibilities
+#
+# Gets a map (associative array) on entry
+exec_sql() {
+# $1	map from caller
+# $2	originator (module) that called	
+local funtag="[${FUNCNAME[0]}]"
+local -n ex_map=$1
+local	originator=$2
+local	sqlcmd=${ex_map[cmd]}
+local	retcode result cmdtype tmp access
+local	time_start=$(date +%s%3N) 
+local	time_end duration
+
+
+	if [ -z "$sqlcmd" ];
+	then 	# Dump a global note and exit program ...
+		trace "Fatal SQL error in $funtag. Empty SQL cmd!"
+		kill -TRAP $$
+	fi	# Stop this mess
+
+	sql_trace "$funtag Start ... $originator; Debug: '$_DEBUG', Trace: '$_TRACE'"
+	[ -n "$_DEBUG" ] && sql_trace "called from line '$(caller)'"
+
+	resultset=()
+
+	tmp=$(echo $sqlcmd)	# Clobber excessive whitespace
+	tmp=${tmp%% *}		# pick first word on cmd line
+	cmdtype=${tmp^^}
+	case $cmdtype in
+		INSERT|UPDATE)	access="W" ;;
+		SELECT)		access="R" ;;
+		*)		access="-"
+				sql_trace "$funtag SQL: '$cmdtype' illegal"
+	;;
+	esac
+
+	# -------- Watch this carefully! ---------
+	[ -n "$_DEBUG" ] && sql_trace "$funtag DB command: $SQL '$sqlcmd'"
+	result=$($SQL "$sqlcmd" 2>&1); retcode=$?
+	[ -n "$_DEBUG" ] && sql_trace "$funtag Result: '$result'"
+
+	ex_map[rc]=$retcode
+	ex_map[access]="$access"
+	ex_map[result]="$result"
+
+	# Einheitliche Fallunterscheidung für alle Fälle
+	case "$retcode:$access" in
+		0:R)	if [ -n "$result" ]
+			then	ex_map[data]="$result"
+				[ -n "$_DEBUG" ] && sql_trace "$funtag Detected '$cmdtype' ... parsing resultset"
+				parse_resultset ex_map
+			else	[ - n "$_DEBUG" ] && sql_trace "$funtag No data returned for '$cmdtype'"
+			fi
+		;;
+		0:W)	[ -n "$_DEBUG" ] && sql_trace "$funtag Write '$cmdtype' successful"
+		;;
+		0:*)	[ -n "$_DEBUG" ] && sql_trace "$funtag Unknown successful operation '$cmdtype'"
+		;;
+		*:*)	ex_map[error]="$result"
+			sql_trace "$funtag SQL ERROR: RC=$retcode, Error='$result'"
+			check_sql_map ex_map
+	;;
+	esac
+
+	# Trace at least this in all modes ...
+	sql_trace "$funtag SQL result: Access: ${ex_map[access]}, $cmdtype, RC=$retcode '$result'"
+
+	# Punch a timing stamp ...
+	time_end=$(date +%s%3N)
+	duration=$((time_end - time_start))
+	sql_trace "$funtag Finished within $duration ms"
+}
+
+
+# Report SQL errors
+# Pick SQL result from a map
+check_sql_map() {
+# $1	map from caller
+local funtag="[${FUNCNAME[0]}]"
+local -n ch_map=$1
+local	msg
+
+	# If we reach here 'rc' is definately not '0'
+	msg="$funtag SQL Error: ${ch_map[rc]}"
+	if [ -n "${ch_map[result]}" ]
+	then msg="$msg, '${ch_map[result]}'"
+	fi
+
+	# Dump a trace entry if needed
+	if [ -n "$msg" ]; then sql_trace "$msg"; fi
+}
+
+
+pickDB-new() {
+local funtag="[${FUNCNAME[0]}]"
+local keep=3	# Number of backups to keep
+local timestamp=$(date --iso=seconds)
+
+	trace "$ME:$funtag Picking new database: $DB from $DB-new"
+
+	# Rotate backups
+	[ -e "$DB" ] && mv "$DB" "$DB-$timestamp"
+
+	# Remove old backups, keep only latest $keep
+	ls -t "$DB"-* 2>/dev/null | tail -n +$(($keep + 1)) | xargs rm -f 2>/dev/null
+
+	# Activate new DB
+	mv "$DB-new" "$DB"
+}
+
+
+# vim: set filetype=sh noexpandtab tabstop=8 shiftwidth=8 autoindent smartindent :

@@ -1,0 +1,190 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+PROC_START=`date +%s%N`
+# - spamhaus -	JSON rendition
+#
+# Plug Spamhaus DROP lists dynamically into firewall ...
+#-------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../../system.conf
+. ../../watchermap.conf
+. ../../common.conf
+. ../../common.bashlib
+#------ [Private stuff ]-------
+. $ME.conf
+. private.bashlib
+
+chmod 700 $ME
+chmod 600 $ME.conf
+
+CHANGED=0
+SPAMHAUS_FILE="drop_v4.json"	# Recommended since end of 2024
+TXTFILE="drop.txt"
+LOADFILE=$POOL/ipset.Loadfile-$ME
+
+trap cleanup 0 1 2 9 15
+
+cleanup() {
+local funtag="[${FUNCNAME[0]}]"
+
+	# Cleanup from RAMdisk use ...
+	if [ -f $POOL/$SPAMHAUS_FILE 	]; then mv $POOL/$SPAMHAUS_FILE .; fi
+	if [ -f $POOL/$TXTFILE		]; then mv $POOL/$TXTFILE	.; fi
+	chmod 600 $SPAMHAUS_FILE $TXTFILE
+
+	# Load what we have
+	SH2FW $TXTFILE "$LOADFILE"
+	load_ipset $MYSET "$SETOPTS" "$LOADFILE"
+# DONT	Already done by load_ipset()
+#	mk-ipset $MYSET "$SETTYP" "$SETOPTS"
+
+	# Remove temporary files from pool (RAMdisk)
+	if [ -e $POOL/$ME.current  ];	then rm -f $POOL/$ME.current	; fi
+	if [ -e $POOL/$ME.droplist ]; 	then rm -f $POOL/$ME.droplist	; fi
+
+	PROC_END=`date +%s%N`
+	PROC_TIME=`echo "scale=3; ($PROC_END - $PROC_START)/10^6" | bc`
+	logger "$ME[$$]: Finished: $PROC_TIME ms"
+	printf  " » %-15s ... finished in %8.2f ms\n" $ME $PROC_TIME
+
+	if [ -n "$WANT_ASN" ]
+	then nohup ../spamhaus-asn/spamhaus-asn >/dev/null 2>&1 &
+	fi	
+}
+
+#
+# Fetch a SpamHaus DROP file if not present
+#
+fetch_drop() {
+# $1	The download file
+local funtag="[${FUNCNAME[0]}]"
+	(cd $POOL; wget -N -q "$HTTPADR/$1")
+	return $?
+}
+
+load_ipset() {
+local funtag="[${FUNCNAME[0]}]"
+local	this_set=$1
+
+	# False (1) if not found ...
+	if ! $IPSET -n list $MYSET >/dev/null 2>&1
+	then mk-ipset_lowlevel	$MYSET "$SETTYP" "$SETOPTS" >/dev/null 2>&1
+	fi
+	
+	# Note: DON'T 'flush' here as this will clear IPSET counters!
+	$IPSET -file $3 restore
+
+	mk_ip-diffs $this_set $TXTFILE
+
+        # Cleanup vanished IPs from IPSET
+        # Read the *.del file in $POOL (RAMdisk) for this zone/IPset
+        # if it exists and is not empty
+
+        if [ -s "$POOL/$this_set.del" ]
+        then
+                echo "$funtag Removing obsolete IPs from $this_set"
+
+                while read ip
+                do ipset del "$this_set" "$ip"
+                done < "$POOL/$this_set.del"
+
+                rm -f "$POOL/$this_set.del"
+        fi
+}
+
+#
+# Read spamhaus drop file in TXT format and output 
+# an ipset loadfile
+#
+SH2FW() {
+local funtag="[${FUNCNAME[0]}]"
+
+	awk  -v loadfile=$2 -v setname=$MYSET -v settyp="$SETTYP" -v setopts="$SETOPTS" '
+	BEGIN		{ SUFFIX="comment spamhaus,drop" }
+	/^[ \t]*;/	{ next }
+			{
+				split ($0,parts,";")
+				IP=parts[1]
+				arr[IP]=IP 
+			}
+	END	 {
+			printf "-exist create %s %s %s\n", setname, settyp, setopts > loadfile
+
+			for (addr in arr) {
+			#	printf "add %s %s %s\n",setname,addr,SUFFIX >> loadfile
+				printf "-exist add %s %s %s\n",setname,addr,SUFFIX >> loadfile
+			}
+	}
+	' $1
+}
+
+
+get_update() {
+local funtag="[${FUNCNAME[0]}]"
+local	exp_date
+local	exp_left
+
+	#
+	# See for the expiration date
+	#
+	spamhaus_date=`grep -E '^(; Expires:)' $2 | cut -f2 -d","`
+	exp_date=`date +%s -d "$spamhaus_date"`
+	exp_left=$(( ($exp_date - `date +%s`)/60 ))
+
+	# Ignore if not expired when present
+	if [ $exp_left -lt 0 ] 
+	then 	: echo "$2 expired ... updating ..."
+		logger "$ME[$$]: $2 expired ... updating ..."
+
+		if [ -f $2 ]; then mv $2 $2-old; fi
+
+		fetch_drop $1
+		if [ $? -eq 0 ]
+		then	((CHANGED++))
+		else	# Reclaim old file and try again later
+			logger "$ME[$$] Fetching '$1' failed ... old file reclaimed"
+			mv $2-old $2
+		fi
+	else 	logger "$ME[$$]: $2 not due for update ..."
+	fi
+}
+
+json2txt() {
+local funtag="[${FUNCNAME[0]}]"
+local	dropfile=$1
+local	dropout=$2
+
+	# Make a .txt file from .json input file on the RAMdisk
+	(cd $POOL
+	if [ -f $SPAMHAUS_FILE ]
+	then	
+		tail -1 $dropfile |\
+		jq -r '"; Spamhaus DROP List \(.timestamp | strftime("%Y/%m/%d")) - \(.copyright)\n; https://www.spamhaus.org/drop/drop_v4.json\n; Last-Modified: \(.timestamp | strftime("%a, %d %b %Y %H:%M:%S UTC"))\n; Expires: \(.timestamp + 86400 | strftime("%a, %d %b %Y %H:%M:%S UTC"))"' > $dropout
+
+		jq -r 'select(.type == null) | (.cidr) + " ; " + (.sblid)' $dropfile >> $dropout
+		echo "; EOF" >> $dropout
+		return 0
+	else	return 1
+	fi
+	) #subshell end
+}
+
+#----------------- Main -----------------------
+dump_runtime
+
+logger "$ME[$$]: Starting ..."
+
+# If the file does not exist just get it
+if [ ! -f $SPAMHAUS_FILE ]
+then fetch_drop $SPAMHAUS_FILE
+else get_update $SPAMHAUS_FILE $TXTFILE
+fi
+
+json2txt $SPAMHAUS_FILE $TXTFILE
+

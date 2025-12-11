@@ -1,0 +1,128 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+####################################################
+# - Looprate --
+# Get times between effective filter calls of a 
+# module from recent trace file
+####################################################
+#------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../system.conf
+. ../watchermap.conf
+. ../common.conf
+. ../common.bashlib
+#------------------------
+
+if [ -z "$1" ]
+then
+	echo "Usage: $ME xx"
+	echo "Specify which module to measure: LG, MX, MB, WB  ..."
+	exit
+else	TRACETOKEN=${1^^}
+fi
+
+case $TRACETOKEN in
+	LG|MB|MX|WB)	FILEPAT="Watch$TRACETOKEN/Watch$TRACETOKEN.trace*"
+	;;
+	GE*)		FILEPAT='GeoTrack/GeoTrack.trace*'
+;;
+esac
+
+eval FILES=$MASTER_PATH/modules/$FILEPAT
+echo 	"-------------------------------------------------------------------------"
+echo	"Watcher $REVISION - Loop rate of module $TRACETOKEN - $HOSTNAME"
+echo 	"-------------------------------------------------------------------------"
+
+awk -v tracetoken=$TRACETOKEN '
+#@include "../awklib/awklib.awk"
+#@include "../awklib/statistics.awk"
+@include "../api/awk/awklib.awk"
+@include "../api/awk/statistics.awk"
+
+#
+# Make a time string from milliseconds value
+#
+function millis2time(val,    rest, days, hours, minutes, seconds, millis) {
+    days    = int(val / (1000 * 86400))
+    rest    = val % (1000 * 86400)
+
+    hours   = int(rest / (1000 * 3600))
+    rest    = rest % (1000 * 3600)
+
+    minutes = int(rest / (1000 * 60))
+    rest    = rest % (1000 * 60)
+
+    seconds = int(rest / 1000)
+    millis  = rest % 1000
+
+    return sprintf("%d d, %02d:%02d:%02d.%03d", days, hours, minutes, seconds, millis)
+}
+
+#
+# Make numerical values in milliseconds from a time-string
+# "days d, hours:minutes:seconds.milliseconds"
+#
+function time2millis (timestr,idx) {
+
+	split(timestr,numdays,"d,")
+	split(numdays[2], times, ":")
+	split(times[3], seconds, ".")
+
+	day_millis	= numdays[1]	*1000*86400
+	hour_millis	= times[1]	*1000*3600
+	minute_millis	= times[2]	*1000*60
+	seconds_millis	= seconds[1]	*1000
+	real_millis	= seconds[2]
+	tot_millis	= day_millis + hour_millis + minute_millis + seconds_millis + real_millis
+#	printf "Total Millis: %6d %15d\n",idx,tot_millis
+
+	return tot_millis
+}
+
+BEGIN { 
+	count=0
+}
+#			{ if ( FNR == 1 ) print FILENAME }
+/(Loop rate:)/		{	#print $0
+				gsub(/[«»]/,"")
+				split ($0, tim, "Loop rate:")
+
+			#	print tim[2]
+				if ( tim[2] == "" ) next
+
+				++count
+				#loop[count]=tim[2]
+				loop[count]=time2millis(tim[2],count)
+			}
+END {
+	n = asort(loop)
+	print "# Elements:",n
+
+	#
+	# Top20 of values
+	#
+	printf	"Top 20 for module: %s\n",tracetoken
+
+	t20=1
+	for (i = n; i > (n-20); i--) {
+		printf "     [%02d] %-20s ", t20, millis2time(loop[i])
+		if ( t20%2 == 0 ) print ""
+		t20++
+	}
+	print ""
+
+	print "Statistics:"
+	print "Min     :",millis2time(loop[1])
+	print "Max     :",millis2time(loop[n]) 
+	print "Avg     :",millis2time(average(loop))
+	print "Median  :",millis2time(median(loop))
+	print "Std Dev.:",millis2time(stddev(loop))
+	print "Variance:",variance(loop)
+}
+' $FILES 

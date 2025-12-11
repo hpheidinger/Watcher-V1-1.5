@@ -1,0 +1,243 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+PROC_START=`date +%s%N`
+#
+# - spamhaus-asn -	JSON rendition
+#
+# Plug Spamhaus DROP lists dynamically into firewall ...
+#-------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../../system.conf
+. ../../watchermap.conf
+. ../../common.conf
+. ../../common.bashlib
+#-------------------------
+. $ME.conf
+. private.bashlib
+
+chmod 700 $ME
+chmod 600 $ME.conf
+
+CHANGED=0
+SPAMHAUS_FILE="asndrop.json"
+LOADFILE=$POOL/ipset.Loadfile-$ME
+BASENAME=`basename $SPAMHAUS_FILE .json`
+TXTFILE="$BASENAME.txt"
+
+trap cleanup 0 1 2 9 15
+
+cleanup() {
+local funtag="[${FUNCNAME[0]}]"
+
+	# Cleanup from RAMdisk use ...
+	if [ -f $POOL/$SPAMHAUS_FILE 	]; then mv $POOL/$SPAMHAUS_FILE .; fi
+	if [ -f $POOL/$TXTFILE		]; then mv $POOL/$TXTFILE	.; fi
+	if [ -f $POOL/DROPLIST.$ME	]; then mv $POOL/DROPLIST.$ME	.; fi
+	chmod 600 $SPAMHAUS_FILE $TXTFILE DROPLIST.$ME
+	
+	# Load what we have
+	SH2FW DROPLIST.$ME "$LOADFILE"
+	load_ipset $MYSET "$SETOPTS" "$LOADFILE"
+
+#	rm $POOL/DROPLIST.$ME* >/dev/null 2>&1
+
+	PROC_END=`date +%s%N`
+	PROC_TIME=`echo "scale=3; ($PROC_END - $PROC_START)/10^6" | bc`
+	logger "$ME[$$]: Finished: $PROC_TIME ms"
+	printf  " » %-15s ... finished in %8.2f ms\n" $ME $PROC_TIME
+}
+
+#
+# Fetch a SpamHaus DROP file if not present
+#
+fetch_drop() {
+# $1	The download file
+local funtag="[${FUNCNAME[0]}]"
+	(cd $POOL; wget -N -q "$HTTPADR/$1")
+	return $?
+}
+
+load_ipset() {
+local funtag="[${FUNCNAME[0]}]"
+
+	# False (1) if not found ...
+	if ! $IPSET -n list $MYSET >/dev/null 2>&1
+	then mk-ipset_lowlevel	$MYSET "$SETTYP" "$SETOPTS" >/dev/null 2>&1
+	fi
+
+	$IPSET -file $3 restore
+}
+
+#
+# Read spamhaus drop file in TXT format and output 
+# an ipset loadfile
+#
+SH2FW() {
+local funtag="[${FUNCNAME[0]}]"
+
+	awk  -v loadfile=$2 -v setname=$MYSET -v settyp="$SETTYP" -v setopts="$SETOPTS" '
+	BEGIN		{ SUFFIX="comment spamhaus,asndrop" }
+	/^[ \t]*;/	{ next }
+			{
+				split ($0,parts,";")
+				IP=parts[1]
+				arr[IP]=IP 
+			}
+	END	 {
+			printf "-exist create %s %s %s\n", setname, settyp, setopts > loadfile
+
+			for (addr in arr) {
+				printf "add %s %s %s\n",setname,addr,SUFFIX >> loadfile
+			}
+	}
+	' $1
+}
+
+
+get_update() {
+local funtag="[${FUNCNAME[0]}]"
+local	exp_date
+local	exp_left
+
+	#
+	# See for the expiration date
+	#
+	spamhaus_date=`grep -E '^(; Expires:)' $2 | cut -f2 -d","`
+	exp_date=`date +%s -d "$spamhaus_date"`
+	exp_left=$(( ($exp_date - `date +%s`)/60 ))
+
+	# Ignore if not expired when present
+	if [ $exp_left -lt 0 ] 
+	then 	: echo "$2 expired ... updating ..."
+		logger "$ME[$$]: $2 expired ... updating ..."
+
+		if [ -f $2 ]; then mv $2 $2-old; fi
+
+		fetch_drop $1
+		if [ $? -eq 0 ]
+		then	((CHANGED++))
+		else	# Reclaim old file and try again later
+			logger "$ME[$$] Fetching '$1' failed ... old file reclaimed"
+			mv $2-old $2
+		fi
+	else
+		logger "$ME[$$]: $2 not due for update ..."
+	fi
+}
+
+mk_cidr() {
+	        case $4 in
+                ### The global providers
+                ARIN)   this_route=`grep -E '^CIDR:'            <<< "$RECORD"   | awk '{print $2}' | head -1`
+                ;;
+                        # LACNIC already provides a CIDR in '^inetnum:'
+                LACNIC) this_route=`grep -E '^inetnum:'         <<< "$RECORD"   | awk '{print $2}' | head -1`
+                ;;
+                RIPE |\
+                AFRINIC) this_route=`grep -E '^[rR]oute:'       <<< "$RECORD"   | awk '{print $2}' | head -1`
+                ;;
+                        # APNIC often has no 'route:' entry at all
+                        # A CIDR must be calculated from the network and broadcast address
+                        # provided in 'inetnum:'
+                APNIC)  answer=`grep -E '^inetnum:' <<< "$RECORD" | awk '{print $2,$4}'`
+                        this_route=`calc_cidr $answer`
+        ;;
+        esac
+}	
+
+#
+# Make a list of IP addresses from the domain list
+# in DROPFILE.$ME
+#
+mk_list() {
+# $1	The spamhaus asndrop.json file
+# $2	The txt file where results go
+local funtag="[${FUNCNAME[0]}]"
+local	domfile=DROPLIST.$ME.domains 
+local	tupfile=DROPLIST.$ME.tuples
+local	txtfile=$2
+
+	> $domfile
+	awk -v txtfile=$txtfile -v tupfile=$tupfile '
+	/("asn":)/	{
+				gsub(/[{}"]/,"")
+				print $0 >> txtfile
+
+				split($0,parts,",")
+
+				split(parts[1],elem,":")
+				asn	= elem[2]
+
+				split(parts[2],elem,":")
+				rir	= elem[2]
+
+				split(parts[3],elem,":")
+				domain	= elem[2]
+
+				# Ignore non-FQDN entries
+				if ( index(domain,".") == 0 ) next
+
+				print asn","rir","domain > tupfile
+
+			#	print $0," »» ",domain	#debug
+				domains[domain]=domain
+			}
+	END	{
+		for (d in domains) { print d }	
+	}
+	' $1 > $domfile
+
+	# Write a drop list (IP addresses) from the domain list
+	# ... and ignore CNAMES ('.' at the end)
+	> DROPLIST.$ME
+
+	dig +short -f $domfile 2>&1 |\
+	awk '
+		/\.$|^$/	{ next }
+		/;; connection/	{ next }
+				{ print $0 }
+	' >> DROPLIST.$ME
+}
+
+json2txt() {
+local funtag="[${FUNCNAME[0]}]"
+local	dropfile=$1
+local	dropout=$2
+
+	# Process in $POOL, which probably has a RAMdisk mounted ...
+	(cd $POOL
+	if [ -f $SPAMHAUS_FILE ]
+	then	echo $funtag $dropfile `pwd`	
+		tail -1 $dropfile | jq -r '"; Spamhaus ASN DROP List \(.timestamp | strftime("%Y/%m/%d")) - \(.copyright)\n; https://www.spamhaus.org/drop/asndrop.json\n; Last-Modified: \(.timestamp | strftime("%a, %d %b %Y %H:%M:%S UTC"))\n; Expires: \(.timestamp+93600 | strftime("%a, %C %b %Y %H:%M:%S UTC"))"' > $dropout
+		mk_list $1 $2
+		return 0
+	else	return 1
+	fi
+	) # subshell end
+}
+
+#----------------- Main -----------------------
+dump_runtime
+
+logger "$ME[$$]: Starting ..."
+
+# Check for the Spamhaus file ...
+if [ ! -f $SPAMHAUS_FILE ]
+then # If the Spamhaus file does not exist just get it
+	fetch_drop $SPAMHAUS_FILE
+else # If the file is pressent see for an update
+	get_update $SPAMHAUS_FILE $TXTFILE
+fi
+
+# Convert it into a .txt file
+json2txt $SPAMHAUS_FILE $TXTFILE
+
+# Now everything is on the RAMdisk @ $POOL
+# Leave here and finish in cleanup()
+

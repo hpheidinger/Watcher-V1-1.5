@@ -1,0 +1,21 @@
+# ----------------------------------------------------------
+# - superfluous_map -
+# Module LG
+#
+# Define patterns for log lines to be skipped in processing.
+# See README-superfluous_map for a detailed explanation
+# ----------------------------------------------------------
+SELF-TEST
+pam_
+polkitd\[
+: PAM
+: input_userauth_request
+: lost connection
+: Connection closed
+: Connection reset by
+: disconnect from
+: Received disconnect from
+: Disconnected from
+: Did not receive identification string from
+: Server listening on
+: Timeout before authentication for

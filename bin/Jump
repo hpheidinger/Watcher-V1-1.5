@@ -1,0 +1,95 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+############################################################
+# - Jump -
+# Jump to path of dynloader, module or rules dir of a module
+# 
+############################################################
+#------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+#. ../system.conf
+#. ../watchermap.conf
+#. ../common.conf
+#. ../common.bashlib
+#------------------------
+
+usage() {
+	echo "Usage:"
+	echo "$ME [-d|-m|-r] {<module> | <dynloader>}"
+	printf "\t%-20s ... %s\n" "-d {<dynloader>}"	"Jump to dynloader path"
+	printf "\t%-20s ... %s\n" "-m {<module>}"	"Jump to module path"
+	printf "\t%-20s ... %s\n" "-r {<module>}"	"Jump to module's rules"
+	echo "Examples:"
+	echo "	# $ME -m MX"
+	echo "	# $ME -d spamhaus"
+	echo
+	echo "Without an option prints this usage information"
+	echo "Without a parameter prints a list of possible choices"
+
+	if [ $0 != 'bash' ]; then exit; fi
+}
+
+view_dyn() {
+local choices
+	choices=`(cd $DYNBASE && echo *) | tr " " "|"`
+	echo "Dynloader choices: $choices"
+}
+
+view_mod() {
+local choices="LG|MX|MB|WB"
+	echo "Module choices: $choices"
+}
+
+
+# -------------------- Main -------------------------------
+echo "--- Jump is experimental ---"
+Base=`Masterpath`
+DYNBASE="$Base/dynload"
+MODBASE="$Base/modules"
+
+if [ $# -eq 0 ]; then usage; fi
+# Careful -- we are sourced for the 'cd' to work
+# so clean some stuff from previous runs
+unset JUMP_PATH
+unset OPTIND OPTERR OPTARG
+unset opts
+while getopts :d:m:r:h opts
+do
+	case $opts in
+		d)	JUMP_PATH="$DYNBASE/$OPTARG"
+		;;
+		m)	JUMP_PATH="$MODBASE/Watch$OPTARG"
+		;;
+		r)	JUMP_PATH="$MODBASE/Watch$OPTARG/rules"
+		;;
+		h)	usage
+		;;
+		':')	echo "»» Parameter missing for '-"$OPTARG"' ««"
+			case $OPTARG in
+				d)	view_dyn ;;
+				m)	view_mod ;;
+				r)	view_mod ;;
+				*)	usage	 ;;
+			esac
+		;;
+		'?')	echo "»» Invalid option ««"; usage; break;
+	;;
+	esac
+done
+# if [ $OPTIND -eq 1 ]; then usage; exit; fi
+# shift $((OPTIND-1))
+
+# echo "PGM: $0"
+# echo "Jump path: $JUMP_PATH"
+if [ "$0" == 'bash' ]
+then
+	echo "Jump path: '$JUMP_PATH'"
+	if [ ! -z "$JUMP_PATH" ];then cd $JUMP_PATH; fi
+fi
+

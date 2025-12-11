@@ -1,0 +1,55 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;   _DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT; _DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then           _TRACE=$1; shift; fi
+####################################################################
+# - Blackouts, Master -
+# Run manually after changes
+# or from startup via FillFW
+####################################################################
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../system.conf
+. ../watchermap.conf
+. ../common.conf
+. ../common.bashlib
+. ../conf/private/$ME.conf
+#------------------------
+
+# Private: write Loadfile from $MASTER_PATH/blackouts
+write_loadfile() {
+	: > "$LOADFILE"
+	echo "create $MYSET $SETTYP $SETOPTS" >> "$LOADFILE"
+	if [[ -s "$MASTER_PATH/blackouts" ]]
+	then
+		while read -r ip; do
+			[[ "$ip" =~ ^# ]] && continue
+			[[ -z "$ip" ]] && continue
+			echo "add $MYSET $ip" >> "$LOADFILE"
+		done < "$MASTER_PATH/blackouts"
+	fi
+}
+
+# Private: create or restore set, then attach drop rules
+mk-blackout() {
+local table=$1
+local hook_chain="PREROUTING"
+
+	# Ensure PREROUTING drop rule exists
+	if ! $IPTABLES -t $table -C $hook_chain -m set --match-set $MYSET src -j DROP >/dev/null 2>&1; then
+		$IPTABLES -t $table -A $hook_chain -m set --match-set $MYSET src -j DROP
+	fi
+
+	# Restore IPset from Loadfile
+	ipset -! restore < "$LOADFILE"
+}
+
+#========================
+# Main execution
+#========================
+write_loadfile
+mk-blackout raw
+mk-blackout mangle
+

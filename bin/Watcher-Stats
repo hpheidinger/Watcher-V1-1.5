@@ -1,0 +1,45 @@
+#!/bin/bash
+#–––––––––––––––––––––––––––––––– Preamble –––––––––––––––––––––––––
+if [[ "$1" == 'debug'  ]]; then set -x;     _DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;   _DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then         _TRACE=$1; shift; fi
+
+############################################################
+# - Watcher-Stats Rev. 1 -
+# - Modular Efficiency Snapshot for Watcher-V1 -
+############################################################
+#--- Mandatory ----------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../system.conf
+. ../watchermap.conf
+. ../common.conf
+. ../common.bashlib
+#--- API stuff ----------
+. ../api/bash/$ME.bashlib
+#--- Private stuff ------
+. ../conf/private/$ME.conf
+#–––––––––––––––––––––––––––––––– Preamble END ––––––––––––––––––––––
+
+#____________________ Main __________________________________________
+#--- Ensure DB exists -----------------------------------------------
+SCHEMA_PATH="../conf/private"
+SCHEMA_FILE="$SCHEMA_PATH/$SCHEMA"
+
+if [[ ! -f "$DB" ]]
+then
+	echo "[$ME] Creating SQLite DB from schema: $SCHEMA_FILE"
+	if [[ -f "$SCHEMA_FILE" ]]
+	then 	$SQL < "$SCHEMA_FILE"
+	else	echo "[$ME] ERROR: Schema file '$SCHEMA_FILE' not found."
+		exit 1
+	fi
+fi
+
+echo "««« $ME is experimental »»»"
+
+# here we go ...
+report_stats
+

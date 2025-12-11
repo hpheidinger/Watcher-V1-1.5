@@ -1,0 +1,84 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+PROC_START=`date +%s%N`
+# - GeoTrack Loader -
+#-------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../../system.conf
+. ../../common.conf
+. ../../common.bashlib
+. GeoTrack.conf
+#-------------------------
+LOADFILE=$POOL/ipset.Loadfile-$MODULE
+
+trap cleanup 0 1 2 9 15
+
+cleanup() {
+local funtag="[${FUNCNAME[0]}]"
+	PROC_END=`date +%s%N`
+        PROC_TIME=`echo "scale=3; ($PROC_END - $PROC_START)/10^6" | bc`
+        logger "$ME[$$]: Finished: $PROC_TIME ms'"
+        printf  " » %-15s ... finished in %8.2f ms\n" $ME $PROC_TIME
+}
+
+load_ipset() {
+local funtag="[${FUNCNAME[0]}]"
+
+	# False (1) if not found ...
+	if ! $IPSET -n list $MODULE >/dev/null 2>&1
+#	then mk-ipset $MODULE-DB "$SETTYP" "$SETOPTS" >/dev/null 2>&1
+	then mk-ipset_lowlevel $MODULE-DB "$SETTYP" "$SETOPTS" >/dev/null 2>&1
+	fi
+
+	$IPSET -file $1 restore
+}
+
+
+#----------------- Main -----------------------
+: echo "Where    : $WHERE"
+: echo "FiFo base: $FIFO_BASE"
+: echo "Pipe     : $PIPE"
+: echo "DB       : $DB"
+: echo "Table    : $TABLE"
+
+logger "$ME[$$]: Loading IPset for $MODULE ..."
+
+# Create a loadfile for IPSET
+$SQL "select ip,route,country from $TABLE" |\
+awk	-v loadfile=$LOADFILE 		\
+	-v setname=$MODULE-DB 		\
+	-v settype=$SETTYP		\
+	-v setopts="$SETOPTS"		'
+BEGIN {} 
+	{ 
+		split ($0,parts,"|")
+		ip 	= parts[1]
+		route	= parts[2]
+		country = parts[3]
+
+		if ( route == "" ) {
+			addr = ip
+		} else {addr = route }
+
+		bandits[addr]=country
+	}
+
+END {
+        printf "-exist create %s %s %s\n",setname,settype,setopts > loadfile
+
+        for (bandit in bandits) {
+                CLASS=bandits[bandit]
+                COMMENT=setname",GeoTrack,"CLASS
+                if (bandit != "") 
+                        printf "add %s %s comment \"%s\"\n", setname,bandit,COMMENT >> loadfile
+        }
+}'
+
+load_ipset $LOADFILE
+

@@ -1,0 +1,75 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+# - Expire -
+# Module MX
+#------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../../system.conf
+. ../../common.conf
+. ../../common.bashlib
+#------------------------
+. WatchMX.conf
+
+trap cleanup 0 1 2 9 15
+
+cleanup() {
+        if [ -n "$PUB_PATH" ]
+        then 	if [ ! -d "$PUB_PATH" ]
+		then 	mkdir "$PUB_PATH"
+			chown apache:apache "$PUB_PATH"
+		fi
+		cp $DB $PUB_PATH
+        fi
+
+        logger "$ME[$$] Cleaned $counter bandits from DB older than $EXPIRE days"
+}
+
+# ----------- Main ---------------------
+if [ -z "$1" ]
+then	EXPIRE=$EXPIRATIONDAYS
+else	EXPIRE=$1
+fi
+
+#echo "Expiring mailhogs older than $EXPIRE days ..."
+logger "$ME[$$] Automatic expiration of mail hogs in class NXDOMAIN older than $EXPIRE days"
+
+CANDIDATES=`$SQL "select count(IP) from mailhogs 
+		where	(julianday('now') - julianday(date_event)) > $EXPIRE";`
+
+if [ $CANDIDATES -eq 0 ]
+then
+	logger "$ME[$$] No candidates for expiration"
+	exit
+fi
+
+echo "Candidates ....: $CANDIDATES"
+echo "Expiration days: $EXPIRE"
+logger $ME[$$] Candidates: $CANDIDATES for expiration
+
+DBHOGS=`$SQL "select IP from mailhogs 
+		where (julianday('now') - julianday(date_event)) > $EXPIRE";`
+
+# First strip database ...
+$SQL "delete from mailhogs 
+	where (julianday('now') - julianday(date_event)) > $EXPIRE;"
+
+$SQL "delete from affairs_by_ip
+	where (julianday('now') - julianday(event_date)) > $EXPIRE;"
+
+$SQL "Vacuum main;"	
+
+# Cleanup in ipset ...
+counter=0
+for h in `echo "$DBHOGS"`
+do
+	((counter++))
+	$IPSET -exist del $MYSET $h
+	$IPSET -exist del custody $h
+done
+

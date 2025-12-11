@@ -1,0 +1,59 @@
+WEB_CLASS=Aggressor
+###############################
+
+# Illegal Method PROPFIND
+RULE=PROPFIND
+Pattern="PROPFIND /"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 4; return $?; fi
+
+RULE=POST-admin-index
+Pattern="POST /administrator/index.php"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 4; return $?; fi
+
+RULE=POST-autodiscover
+Pattern="POST /Autodiscover/"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 4; return $?; fi
+
+RULE=POST-phpunit
+Pattern="POST /vendor/phpunit/"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 4; return $?; fi
+
+RULE=POST-cgi-bin
+Pattern="POST /cgi-bin/"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 4; return $?; fi
+
+RULE=POST-wp-includes
+Pattern="POST /wp-includes/"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 4; return $?; fi
+
+RULE=POST-db-init
+Pattern="POST /db.init.php"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 4; return $?; fi
+
+RULE=POST-db-session
+Pattern="POST /db_session.init.php"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 4; return $?; fi
+
+RULE=POST-Black+white
+Pattern="POST /editBlackAndWhiteList"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 4; return $?; fi
+
+RULE=POST-loginregister
+Pattern="POST /login-register/"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=POST_en_login
+Pattern="POST /en/log-in"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+

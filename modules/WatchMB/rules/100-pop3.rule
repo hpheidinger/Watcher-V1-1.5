@@ -1,0 +1,5 @@
+RULE=POP3-break-in
+Pattern="Error:[pop3]"
+#-------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject; return $?; fi
+

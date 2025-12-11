@@ -1,0 +1,100 @@
+###+
+### - Dynloader geo - private.bashlib
+###-
+# Delete zone files that are no longer in $ZONES
+del_zones() {
+local funtag="[${FUNCNAME[0]}]"
+local	zonefiles=`echo $ZONE_DIR/*.zone`
+local	confzones=
+local	rem=
+local	f z
+
+	for z in $ZONES
+	do	confzones=$confzones" $ZONE_DIR/$z$AGG_SUF"
+	done
+
+	for f in $zonefiles
+	do	
+		if [[ "$confzones" =~ "$f" ]]
+		then continue
+		else rem="$rem $f"
+		fi
+	done
+
+	trace "»» Removing zone files: $rem"
+	if [ -n "$rem" ]
+	then rm -f $rem
+	fi
+}
+
+# Fetch new zone files, that are not already present relating to $ZONES
+# Note: This will fill $ZONE_DIR on the initial run
+# 	i.e. if $ZONE_DIR is empty 
+new_zones() {
+local funtag="[${FUNCNAME[0]}]"
+local	z zonefile
+
+	for z in $ZONES
+	do	zonefile=$z$AGG_SUF
+		if [ ! -f $ZONE_DIR/$zonefile ]
+		then 	echo	"»»» $ME $funtag: Fetching $zonefile"
+			logger 	"»»» $ME $funtag: Fetching $zonefile"
+			fetch_zone $zonefile
+		fi
+	done
+}
+
+# Get a zone file to hook directory
+# Push it to the pool (ZONE_DIR) on success
+fetch_zone() {
+# $1	Zone file to fetch
+local funtag="[${FUNCNAME[0]}]"
+local	msg 
+
+	$WGET -N $DAT_URL/$1
+	if [ -e $1 ]
+	then 	mv $1 $ZONE_DIR/
+		UPDATED="$UPDATED $1"
+		return 0	# Flag 'transfer succeeded'
+	else 	msg="Failed to retrieve $1"
+		echo	$msg
+		logger	$ME/$funtag "$msg"
+		(( MISSING++ ))
+		return 1	# Flag 'transfer failed'
+	fi
+}
+
+mk_fetchlist() {
+local funtag="[${FUNCNAME[0]}]"
+
+	awk -v zones="$ZONES" '
+	BEGIN {
+		# Load old hashes
+		while (getline < ".laststamp") {
+				LAST[$2] = $1 
+		}
+	}
+		{ NEW[$2] = $1 }
+	END	{
+		matchzones = zones
+		gsub(" ","|",matchzones)
+
+		# compare new and old hashes
+		for (zonefile in LAST) {
+			# Match with ZONES or continue
+			match(zonefile, "^(" matchzones ")-")
+
+			if ( RSTART == 0 || RLENGTH == -1) {continue}
+
+			# On differing hashes output the zonefile as a candidate
+			if (LAST[zonefile] != NEW[zonefile]) {
+				realfiles=realfiles sprintf ("%s ", zonefile)
+			}
+		}
+
+		print realfiles
+	}
+	' MD5SUM
+}
+
+# vim: set filetype=sh noexpandtab tabstop=8 shiftwidth=8 autoindent smartindent :

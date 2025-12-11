@@ -1,0 +1,38 @@
+#!/bin/bash
+BASE=`Masterpath`
+MODPATH=$BASE/modules
+CHOICES=`(cd $MODPATH; echo *)`
+
+_choices() {
+local	inter this_shell	
+	: echo "Modules: $CHOICES"
+	echo "Possible choices: LG,MB,MX,WB,GE* (any case)"
+
+	this_shell=`echo $0`
+	inter=`grep -oE "bash|dash|zsh|csh" <<< $this_shell`
+	if [ -z "$inter" ]; then exit; fi
+}
+
+if [ -z "$1" ]
+then	_choices
+else	SUFFIX=${1^^}
+	case $SUFFIX in
+		LG|MB|MX|WB)	TARGET="Watch"$SUFFIX
+		;;
+		GE*)		TARGET="GeoTrack"
+	;;
+	esac
+
+	if [ -z "$TARGET" ]
+       	then _choices
+	else  echo "$MODPATH/$TARGET"
+	fi
+
+	# 'cd' works only when program is sourced!
+	# ... otherwise does nothing ...
+	if [ -d $MODPATH/$TARGET ]
+	then	cd $MODPATH/$TARGET
+        else    echo "»» No such module path'$MODPATH/$TARGET'"
+        	_choices
+        fi
+fi

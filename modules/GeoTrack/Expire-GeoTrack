@@ -1,0 +1,62 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+# - Expire-Geotrack -
+#------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../../system.conf
+. ../../common.conf
+. ../../common.bashlib
+#------------------------
+. GeoTrack.conf
+
+if [ -z "$1" ]
+then	EXPIRE=$EXPIRATIONDAYS
+else	EXPIRE=$1
+fi
+
+logger "$ME[$$] Expiration of $ME older than $EXPIRE days"
+
+CANDIDATES=`$SQL "select count(IP) from $TABLE 
+		where  (julianday('now') - julianday(regdate)) > $EXPIRE;"`
+
+if [ $CANDIDATES -eq 0 ]
+then
+	logger	"$ME[$$] No candidates for expiration ..."
+	exit
+else	
+	logger	"$ME[$$] Candidates for expiration: $CANDIDATES"
+fi
+
+echo "Candidates      : $CANDIDATES"
+echo "Expiration days : $EXPIRE"
+
+BANDITS=`$SQL "select IP from $TABLE 
+		where  (julianday('now') - julianday(regdate)) > $EXPIRE;"`
+
+#
+# First strip the database ...
+#
+$SQL "delete from $TABLE 
+	where (julianday('now') - julianday(regdate)) > $EXPIRE;"
+
+$SQL "Vacuum main;"	
+
+#
+# Cleanup firewall from expired DROPs
+#
+counter=0
+for h in `echo $BANDITS`
+do
+	((counter++))
+	$IPSET -exist del $MYSET $h
+	$IPSET -exist del custody $h
+done
+
+logger "$ME[$$] Cleaned $counter bandits from DB '$DB' older than $EXPIRE days"
+

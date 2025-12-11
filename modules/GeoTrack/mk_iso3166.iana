@@ -1,0 +1,81 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+# - mk_iso3166.iana -
+#
+# See if a given IP address is from a forbidden country
+#
+#-------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../../system.conf
+. ../../watchermap.conf
+. ../../common.conf
+. ../../common.bashlib
+#-------------------------
+. GeoTrack.conf		# Listen to mother's voice
+
+trap 'exiting $? "$_"'	EXIT
+
+exiting() {
+local funtag="[${FUNCNAME[0]}]"
+	echo "$funtag RC: $1, $2"
+	if [ $1 -eq 0 ]
+	then rm -f iso3166_*
+	fi
+}
+
+TABLE=iso3166
+ISO3166_TAB=https://data.iana.org/time-zones/tzdb-2020e/iso3166.tab
+
+FILE=`basename $ISO3166_TAB`
+olddate=`date --iso=seconds -r $FILE`
+wget -q -N $ISO3166_TAB
+newdate=`date --iso=seconds -r $FILE`
+
+#head -1 $FILE | tr -d "_"| tr "-" "_" > $TABLE"_header"
+echo "alpha_2,name" > $TABLE"_header"
+
+# Create SQL table from header line
+awk -v table=$TABLE '
+BEGIN {
+	outfile=table"_table"
+	print "Drop table if exists",table";" > outfile
+	print "create table", table, "(" > outfile
+}
+	{ record = $0 }
+END {
+	x=split(record,field,",")
+
+	for ( i=1; i<=x; i++ ) {
+		printf "%25s text,\n", field[i] > outfile
+	}
+
+	printf "%25s %s\n", "primary key","(alpha_2)" > outfile
+	print ");" > outfile
+}
+' $TABLE"_header"
+
+# Bump data ...
+awk -v table=$TABLE '
+BEGIN	 	{ FS="\t"; outfile=table"_data.csv" }
+/^[ \t]*#/	{ next }	# ignore comment lines
+		{ 
+			code=$1
+		#	rest2=index($0,$2)
+		#	name=substr($0,rest2)
+			name=$2
+			print code",\""name"\"" > outfile }
+' $FILE
+
+$SQL < $TABLE"_table"
+$SQL <<- EOF
+	.mode csv
+	.import iso3166_data.csv $TABLE
+	EOF
+
+: echo "ISO-3166 code table prepared"

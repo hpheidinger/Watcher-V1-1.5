@@ -1,0 +1,19 @@
+RULE=SASL-login-failed
+Pattern=": SASL LOGIN authentication failed"
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject; return $?; fi
+#-------
+
+RULE=SASL-plain-failed
+Pattern=": SASL PLAIN authentication failed"
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject; return $?; fi
+#-------
+
+RULE=SASL-MD5_login-failed
+Pattern=": SASL CRAM-MD5 authentication failed"
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject; return $?; fi
+#-------
+
+RULE=SASL_NTLM_authentication_failed
+Pattern=": SASL NTLM authentication failed:"
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject; return $?; fi
+#-------

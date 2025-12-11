@@ -1,0 +1,81 @@
+#
+# - badbots_map -
+#    WB module
+#
+# Note, that the provided expressions are REGEX
+# for the BASH match operator (=~)
+# I.e. spaces (' ') and dots ('.')) must be escaped.
+#
+# Keep this list sorted:
+# cat badbots_map | grep -v '^#'| sort
+compatible;\ AhrefsBot
+compatible; aiHitBot/
+AliyunSecBot/
+compatible; BitSightBot/
+CCBot/
+compatible; GoParserBot/
+HanaleiBot
+HawaiiBot
+compatible; JoomlaCheckBot/
+compatible; MetaJobBot;
+MyAwesomeRobotsBot/
+compatible; PerplexityBot/
+compatible; SeekportBot
+SeobilityBot
+Spider_Bot/
+SuperBot/
+compatible; t3versionsBot/
+WanScannerBot/
+compatible; WebwikiBot/
+compatible; YandexBot/
+ZoomBot
+compatible; AwarioBot/
+compatible; ModatScanner/
+Go-http-client/
+AiHitBot
+Cliqzbot
+CodaBot
+linkdexbot
+SearchmetricsBot
+SISTRIX
+CareerBot
+GrapeshotCrawler
+iCjobs
+magpie-crawler
+proximic
+QuerySeekerSpider
+Vagabondo
+WBSearchBot
+ZoominfoBot
+@expanseinc.com
+Expanse,\ 
+;\ Dataprovider.com
+compatible;\ PetalBot;
+;\ SemrushBot
+compatible;\ BacklinksExtendedBot
+;\ MJ12bot
+;\ adscanner
+compatible;\ DotBot
+;\ SeznamBot
+compatible;\ MegaIndex.ru
+;\ Mail.RU_Bot
+;\ WellKnownBot
+compatible;\ NetcraftSurveyAgent
+compatible;\ BLEXBot
+compatible;\ Barkrowler
+serpstatbot
+facebookexternalhit
+compatible;\ SEOkicks
+python-requests
+pawning-AI
+compatible;\ GeedoBot
+compatible;\ DataForSeoBot
+compatible;\ Bytespider
+CensysInspect
+meta-externalagent
+compatible;\ ImagesiftBot
+compatible;\ TikTokSpider
+compatible; InternetMeasurement/
+compatible;\ Amazonbot/
+Nextcloud Server Crawler
+OpenTheBoxBot/

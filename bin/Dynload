@@ -1,0 +1,32 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+# - Dynload -
+# Switch to a dynloader path if it exists
+# 
+__BASE=`Masterpath`
+__DYNPATH=$__BASE/dynload
+__CHOICES=`(cd $__DYNPATH; echo *)`
+
+__choices() {
+	echo "Possible choices: $__CHOICES"
+}
+
+if [ -z "$1" ]
+then __choices
+else
+	__TARGET=$1
+	# 'cd' works only when program is sourced!
+	# ... otherwise does nothing ...
+	if [ -d $__DYNPATH/$__TARGET ]
+	then	echo "$__DYNPATH/$__TARGET"
+		cd $__DYNPATH/$__TARGET
+	else 	echo "No such dynloader path '$__DYNPATH/$__TARGET'"
+		__choices
+	fi
+fi
+
+unset	 __BASE __DYNPATH __TARGET __CHOICES
+unset -f __choices

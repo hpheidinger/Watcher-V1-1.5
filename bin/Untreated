@@ -1,0 +1,49 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+############################################################
+# - Untreated -
+# Find trace entries w/o a rule match in module traces
+# i.e. marked as '[UNTREATED]'
+############################################################
+#--- Mandatory ----------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+#--- Listen to mother's voice ----
+. ../system.conf
+. ../watchermap.conf
+. ../common.conf
+. ../common.bashlib
+#--- Private stuff ------
+#. ../api/bash/$ME.bashlib
+#. ../conf/private/$ME.conf
+
+trap cleanup	0 1 2 9 15
+
+cleanup() {
+:
+}
+
+#____________ Main ______________
+if [ -z "$1" ]
+then
+	echo "Usage: $ME xx"
+	echo "Specify which module to measure: LG, MX, MB, WB or GE (for GeoTrack) ..."
+	exit
+else	TRACETOKEN=${1^^}
+fi
+
+case $TRACETOKEN in
+	LG|MB|MX|WB)	FILEPAT="Watch$TRACETOKEN/Watch$TRACETOKEN.trace*"
+	;;
+	GE*)		FILEPAT='GeoTrack/GeoTrack.trace*'
+;;
+esac
+
+eval FILES=$MASTER_PATH/modules/$FILEPAT
+
+grep '\[UNTREATED\]' $FILES

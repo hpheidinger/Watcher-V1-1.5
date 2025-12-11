@@ -1,0 +1,89 @@
+# ---------------------------------------------------
+# - superfluous_map -
+# Module MX
+#
+# See README-superfluous_map for detailed explanations.
+# ---------------------------------------------------
+SELF-TEST
+#db_con_get
+dbmail/timsieved
+
+# postfix is pretty chatty ...
+# only 'postfix/smtpd' is really of interest
+# » Assure 'postfix/smtp' has the opening bracket
+# » attached or postfix/smtpd is kicked to bin as well
+# » Like this: 'postfix/smtp\['
+postfix/cleanup\[
+postfix/anvil\[
+postfix/bounce\[
+postfix/lmtp\[
+postfix/smtp\[
+postfix/master\[
+postfix/postfix-script\[
+postfix/pipe\[
+postfix/pickup\[
+postfix/qmgr\[
+postfix/scache\[
+postfix/postsuper\[
+postfix/postmap\[
+postgrey\[
+spamd\[
+opendkim\[
+opendmarc\[
+
+#
+# SMTPD 'informationals' ... no rules for these
+# So they must be suppressed here
+# 
+: Anonymous TLS connection
+
+#
+# SMTPD 'secondaries' ...
+#
+#: SSL_accept error from
+#: improper command pipelining after CONNECT
+#: improper command pipelining after EHLO
+: improper command pipelining
+: Name or service not known
+: Connection timed out
+: timeout
+: lost connection
+: disconnect
+
+#
+# All the other postfix chit-chat's
+#
+: abort all milters
+: input attribute
+: milter
+: match_
+: event:
+: statistics:
+: generic_checks:
+: send attr
+: ctable_locate:
+: report data
+: connect to subsystem
+: after
+: before
+: reply:
+: mail_addr_find:
+: maps_find:
+: dict_pgsql_lookup:
+: mail_addr_find:
+: reject_unauth_pipelining:
+: smtpd_check_rewrite:
+: smtpd_check_queue:
+: smtpd_check_addr:
+: extract_addr:
+: name_mask:
+: fd=
+: vstream_tweak_
+: reject_
+
+ private/
+ public/
+ milter
+: >>> START
+: >>> END
+: >>> CHECKING RECIPIENT

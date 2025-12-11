@@ -1,0 +1,39 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+####################################################
+# - Huntip -
+# Find an IP address in an IPSET ...
+####################################################
+#------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../system.conf
+. ../watchermap.conf
+. ../common.conf
+. ../common.bashlib
+#------------------------
+
+if [ -z "$1" ]
+then	echo "Specify left part of an IP address"
+	exit
+else	PATTERN=`awk '{gsub(/\./,"\\\\."); print}' <<< "$1"`
+fi
+
+: echo $PATTERN
+
+ipset l | grep '^[1-9]'| grep "^$PATTERN"
+exit
+
+IPSETS=`ipset -n list`
+
+for s in `echo $IPSETS`
+do
+	echo "IPset $s ..."
+	ipset l $s | grep '^[1-9]'| grep "^$PATTERN"
+done
+

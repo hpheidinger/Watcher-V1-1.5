@@ -1,0 +1,381 @@
+# - private.bashlib -
+# - WatchWB -
+# Settings & functions private to this module
+#
+
+# Make an IPSET for 'passthru' access
+# Type ACCEPT with counters
+mk-patssthru() {
+:
+}	
+
+#
+# - inject -
+# Do all the dirty work here
+# determination, affair counting, dropping, etc. ...
+#
+inject() {
+local	funtag="[${FUNCNAME[0]}]"
+local	penalty=${1:-1}
+local	retcode
+local	isdropped
+local	haveit this_ip this_state this_affairs this_severity
+
+	trace "$funtag Triggered by rule [$RULESET/$RULE] '$Pattern'"
+
+# If bandit is determined in the preprocessor don't repaet here
+#	BANDIT=`get_bandit`
+	
+	if ipset -q test whitelist "$BANDIT"
+	then return 3   # Flag whitelisted IP address and bailout
+	fi
+
+# IP valiadation automagically done by the IPSET command
+# ... no longer needed in Watcher 1.3 and beyond
+#	validate_IP $BANDIT
+#	if [ $? -ne 0 ]
+#	then	trace "$funtag Got junk for bandit '$BANDIT' ... bailing out ..."
+#		return 255
+#	fi
+
+#	CLASS=`get_class $BANDIT`	# IP address classification not needed for WEB access 
+	CLASS=Httpd			# ... so set some dummy as default
+
+	HTTP_METHOD=`get_method`
+	HTTP_CODE=`get_httpcode`
+
+	if [ -z "$WEB_CLASS" ]; then WEB_CLASS="_unknown_"; fi
+	
+	trace "$funtag $CLASS $BANDIT, WEB-Class: '$WEB_CLASS', HTERR: '$HTTP_CODE', Method: '$HTTP_METHOD'"
+
+	#
+	# See if this bandit is already known ...
+	#
+	sql_track=()
+	sql_track[cmd]="
+		select IP,state,affairs,severity from $TABLE where IP='$BANDIT'
+		;"
+	exec_sql sql_track
+
+	this_ip=${resultset[IP]}
+	this_state=${resultset[state]}
+	this_affairs=${resultset[affairs]}
+	this_severity=${resultset[severity]}
+
+	haveit=${resultset[IP]}
+	: echo "««««««««««« [haveit] == $haveit »»»»»»»»»»»»»"
+
+	# Introduction of bandit?
+	if [ -z "$haveit" ]
+	then
+		if [ -n "$GEOTRACK" ]; then do_geotrack $BANDIT $ME $funtag; fi
+
+		affairs=$penalty
+		STATE='INTRO'
+		SEVERITY='Initial'
+		ACTION="Initial $affairs/$MAX_AFFAIRS, Penalty: $penalty"	
+		Comment="Break-in"
+
+		# Fix IPset first of all
+		$IPSET -exist add tarpit $BANDIT timeout $((2**affairs * TIME_SLICE)) comment "tarpit,$THIS_TYPE,$affairs"
+		sql_track=()
+		sql_track[cmd]="
+			insert into $TABLE 
+				(IP,origin,ruleset,rule,class,web_class,method,state,severity,type,affairs,
+				date_event,date_intro,instance,comment)
+			values 	('$BANDIT','$ME','$RULESET','$RULE','$CLASS','$WEB_CLASS','$HTTP_METHOD',
+				'$STATE','$SEVERITY','$THIS_TYPE',$affairs,
+			      	datetime(current_timestamp,'localtime'),
+                        	datetime(current_timestamp,'localtime'),
+				$INSTANCE_ID, '$Comment')
+			;"
+		exec_sql sql_track
+
+		retcode=1
+	else	# OK. Have this culprit already
+		affairs=$this_affairs
+
+		# Limit exeeded ?
+		if [ $affairs -gt $MAX_AFFAIRS ]
+		then
+			trace "$funtag DROPed culprit $BANDIT reoccured ... taken into custody"
+			$IPSET -exist add custody $BANDIT comment "custody-$funtag,$THIS_TYPE,$WEB_CLASS"
+			retcode=1
+			return $retcode		# Take the short way out ... just return
+		fi
+
+		# Limit reached ?
+		if [ $affairs -lt $MAX_AFFAIRS ]
+		then	# Count up bandit's affairs
+			((affairs++))
+
+			# Fix IPset first of all ...
+			$IPSET -exist add tarpit $BANDIT timeout $((2**affairs * TIME_SLICE)) comment "tarpit,$THIS_TYPE,$affairs"
+			
+			STATE='COUNT'
+			ACTION="Count   $affairs/$MAX_AFFAIRS"
+			SEVERITY='Counted'
+
+			sql_track=()
+			sql_track[cmd]="
+				update $TABLE set
+					affairs		= affairs+1,
+					rule		= '$RULE',
+					class		= '$CLASS',
+					state		= '$STATE',
+					severity	= '$SEVERITY',
+					method		= '$HTTP_METHOD',
+					date_event	= datetime(current_timestamp,'localtime')
+				where IP='$BANDIT'
+				;"
+			exec_sql sql_track
+
+			retcode=1
+		else	# Drop if the limit is reached
+			# Fix IPset first of all ...
+			$IPSET -exist add tarpit $BANDIT timeout $((2**affairs * TIME_SLICE)) comment "tarpit,$THIS_TYPE,$affairs"
+			
+			STATE='DROP'
+			ACTION="Dropped @ $affairs"
+			SEVERITY='Dropped'
+
+			sql_track=()
+			sql_track[cmd]="
+				update $TABLE set
+					class		= '$CLASS',
+					web_class	= '$WEB_CLASS',
+					state		= '$STATE',
+					severity	= '$SEVERITY',
+					origin		= '$ME',
+					rule		= '$RULE',
+					method		= '$HTTP_METHOD',
+					affairs		= $affairs, 
+					comment		= '$ACTION',
+					date_event	= datetime(current_timestamp,'localtime')
+				where IP='$BANDIT'
+				;"
+			exec_sql sql_track
+
+			retcode=1	# Last round in tarpit for the culprit
+		fi
+	fi
+
+#	write_affairs $BANDIT $affairs $RULE $RULESET $INSTANCE_ID
+
+#	clog	"$funtag" "$CLASS" "$BANDIT" "'$ACTION'" 
+#	trace	"$funtag $CLASS $BANDIT '$ACTION'"
+	clog	"$funtag" "$THIS_TYPE" "$BANDIT" "'$ACTION'" 
+	trace	"$funtag $THIS_TYPE $BANDIT '$ACTION'"
+
+	return $retcode
+}
+
+
+get_method() {
+local funtag="[${FUNCNAME[0]}]"
+
+	awk '
+	/ [\042](GET )/		{ print "GET";		exit }
+	/ [\042](POST )/	{ print "POST";		exit }
+	/ [\042](PUT )/		{ print "PUT";		exit }
+	/ [\042](HEAD )/	{ print "HEAD";		exit }
+	/ [\042](DELETE )/	{ print "DELETE";	exit }
+	/ [\042](OPTIONS )/	{ print "OPTIONS";	exit }
+	/ [\042](PATCH )/	{ print "PATCH";	exit }
+	/ [\042](CONNECT )/	{ print "CONNECT";	exit }
+	/ [\042](TRACE )/	{ print "TRACE";	exit }
+	' <<< "$REPLY"
+}
+
+get_instance() {
+local funtag="[${FUNCNAME[0]}]"
+	awk '
+	match($0,"[[]Instance: ") {
+		tail=substr($0,RSTART+RLENGTH)
+		split(tail,parts,":")
+		print parts[1]
+	}' <<< $REPLY
+}
+
+get_insttype() {
+local funtag="[${FUNCNAME[0]}]"
+	awk '
+	match($0,"]@") { print substr($0,RSTART+RLENGTH) }
+	' <<< $REPLY
+}
+
+get_httpcode() {
+local funtag="[${FUNCNAME[0]}]"
+	awk 'match($0,/[ ]+[1-9][0-9]{2}[ ]+/) {
+		print substr($0,RSTART+1,RLENGTH-2) 
+	}
+	' <<< $REPLY
+}
+
+write_affairs() {
+local funtag="[${FUNCNAME[0]}]"
+local	u_seconds=`date +%s%6N`	
+	
+	sql_track=()
+	sql_track[cmd]="
+	insert into	affairs_by_ip
+			(ip_addr, affair_num, rule, ruleset, instance,
+			date_event, time_useconds)
+		values 	('$1',$2,'$3','$4','$5', 
+			datetime(current_timestamp,'localtime'), $u_seconds)
+	;"
+	exec_sql sql_track
+}
+
+get_sets() {
+local funtag="[${FUNCNAME[0]}]"
+local	sets
+
+	sets=`find rules/ -type d | cut -f2 -d"/"`
+	echo $sets
+}
+
+#
+# Provide filter() function as a dispatcher
+# to call the real filters 'ruleset-XXXX'
+#
+filter() {
+# $1	... the instance type
+local funtag="[${FUNCNAME[0]}]"
+local retcode rs
+	# Call ruleset for the instance typ first
+	# and the 'Common' ruleset as a catch-all
+	if [ -n "$1" ]
+	then
+
+		effective_sets=$(
+		echo -e "ruleset-Common\nruleset-$1" |uniq | xargs)
+		[ -n "$_DEBUG" ] && trace "$funtag Effective sets: $effective_sets"
+
+		for rs in $effective_sets
+		do 	RULESET=$rs
+
+			if [ -n "$_DEBUG" ]
+			then	
+				trace "Checking ruleset: $rs"
+
+				# Existenz prüfen
+				if ! declare -F $rs >/dev/null
+				then
+					trace "[ERROR] Missing ruleset function: $rs"
+					return 242  # Flag 'missing ruleset' to post processor
+				fi
+				
+				trace "»»»»»»» Tracking ruleset '$rs' «««««"
+				trace "»»»»»»» Instance      : $INSTANCE"
+				trace "»»»»»»» Instance type : $INSTANCE_TYPE"
+				trace "»»»»»»» Instance ID   : $INSTANCE_ID"
+			fi
+
+			$rs; retcode=$?
+			[[ $retcode -ne 0 ]] && return $retcode
+		done
+	else	trace "$funtag No specific ruleset for $REPLY"
+	fi
+
+	# Never reached on match in a ruleset
+	RULE=NO_RULE_MATCH
+	return 0
+}
+
+#
+# Kick off a bandit w/o further discussion
+# ... for known nasty badfingers
+# ... or obvious assault and/or ill-use
+kickoff() {
+local funtag="[${FUNCNAME[0]}]"
+local   penalty=$MAX_AFFAIRS
+local   affairs=$penalty
+local   haveit
+local	state=DROP	# We always drop recklessly ...
+local	http_code=`get_httpcode`
+local	http_method=`get_method`
+
+	trace "$funtag $BANDIT, [$RULESET/$RULE], '$Pattern'"
+
+	# Put into custody first ..
+	ipset -exist add custody $BANDIT comment "custody-$funtag,$THIS_TYPE"
+
+	# ... then nail it into the database
+	sql_track=()	# Reset array
+	sql_track[cmd]="
+		select IP from $TABLE where IP='$BANDIT'
+		;"
+	exec_sql sql_track
+
+	haveit=${resultset[IP]}
+	: echo "««««««««««« [haveit] == $haveit »»»»»»»»»»»»»"
+
+	if [ -z "$haveit" ]
+	then
+		if [ -n "$GEOTRACK" ]; then do_geotrack $BANDIT $ME $funtag; fi
+
+		ACTION="$funtag $affairs/$MAX_AFFAIRS, Penalty: $penalty"
+
+		sql_track=()	# Reset array
+		sql_track[cmd]="
+			insert into $TABLE
+				(IP,origin,rule,class,web_class,method,state,severity,affairs,
+				type,date_intro,date_event)
+			values	('$BANDIT','$ME','$RULE','$CLASS','$WEB_CLASS','$http_method',
+				'$state','$funtag',$affairs,'$THIS_TYPE',
+				datetime(current_timestamp,'localtime'),
+				datetime(current_timestamp,'localtime') )
+			;"
+		exec_sql sql_track
+	else
+		ACTION="$funtag $affairs/$MAX_AFFAIRS"
+
+		sql_track=()	# Reset array
+		sql_track[cmd]="
+			update $TABLE set
+				affairs		= $affairs,
+				web_class	= '$WEB_CLASS',
+				method		= '$http_method',
+				state		= '$state',
+				severity	= '$funtag',
+				rule		= '$RULE',
+				date_event	= datetime(current_timestamp,'localtime')
+			where IP='$BANDIT'
+			;"
+		exec_sql sql_track
+	fi
+
+	clog	"$funtag" "$WEN_CLASS" "$BANDIT" "'$ACTION'" 
+	return	1        # Immediate return and let the post processor know
+}
+
+mk_badbots() {
+local funtag="[${FUNCNAME[0]}]"
+        awk '
+        BEGIN   { str="" }
+        /^[ \t]*($|#)/  { next }
+                        { str=str $0 "|" }
+        END {   gsub(/[|]$/,"",str)
+                print str
+        }
+        ' < rules/badbots_map
+        trace "$funtag (Re)building badbots_map"
+}
+
+mk_whitebots() {
+local funtag="[${FUNCNAME[0]}]"
+        awk '
+        BEGIN   { str="" }
+        /^[ \t]*($|#)/  { next }
+                        { str=str $0 "|" }
+        END {   gsub(/[|]$/,"",str)
+                print str
+        }
+        ' < rules/whitebots_map
+        trace "$funtag (Re)building whitebots_map"
+}
+
+
+# vim: set filetype=sh noexpandtab tabstop=8 shiftwidth=8 autoindent smartindent :
+

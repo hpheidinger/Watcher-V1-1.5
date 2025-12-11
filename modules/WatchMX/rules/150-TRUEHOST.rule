@@ -1,0 +1,5 @@
+RULE=Host
+Pattern=': connect from'
+#--------------	
+if [[ "$REPLY" =~ "$Pattern" ]]; then CLASS=TRUEHOST; inspect; return $?; fi
+

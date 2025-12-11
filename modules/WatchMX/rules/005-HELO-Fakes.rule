@@ -1,0 +1,11 @@
+#
+# 005-HELO-Fakes.rule
+#
+# Kick off culprits that fake HELO
+# Calls 'kickoff' instead 'inject'
+#
+RULE=HELO-Fake
+Pattern=': Helo command rejected: Host not found;'
+#-------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+

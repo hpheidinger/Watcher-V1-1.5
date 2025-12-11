@@ -1,0 +1,77 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+########################################################
+# - Sqlrate -
+# Get average SQL processing rate from a modules' recent
+# trace file* (<MODULE>.sql_trace*)
+########################################################
+#------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../system.conf
+. ../watchermap.conf
+. ../common.conf
+. ../common.bashlib
+#------------------------
+
+if [ -z "$1" ]
+then
+	echo "Usage: $ME xx"
+	echo "Specify which module to measure: LG, MX, MB, WB or GE (for GeoTrack) ..."
+	exit
+else	TRACETOKEN=${1^^}
+fi
+
+case $TRACETOKEN in
+	LG|MB|MX|WB)	FILEPAT="Watch$TRACETOKEN/Watch$TRACETOKEN.sql_trace*"
+	;;
+	GE*)		FILEPAT='GeoTrack/GeoTrack.sql_trace*'
+;;
+esac
+
+eval FILES=$MASTER_PATH/modules/$FILEPAT
+echo 	"–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––"
+printf	"Watcher $REVISION - SQL processing rate for module: %s\n" $TRACETOKEN
+echo 	"–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––"
+
+awk '
+@include "../api/awk/awklib.awk"
+@include "../api/awk/statistics.awk"
+BEGIN { 
+	count=0
+	sum_filt=0
+}
+#			{ if ( FNR == 1 ) print FILENAME }
+/exec_sql\].*( ms)$/		{
+				timing=$(NF-1)
+				++count
+				filt[count]	=  timing
+				sum_filt	+= timing
+			}
+END {
+#	asort(filt)
+
+	# Supress a division-by-0 error
+	if ( count == 0 ) {
+		print "No records ... exiting"
+		exit
+	}
+
+	Fmin=arr_min(filt)
+	Fmax=arr_max(filt)
+	Favg=average(filt)
+	Fmed=median(filt)
+
+	print	"Records:", count
+	print	"–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––"
+	printf	"%-6s|%14s %14s %14s | %8s %8s\n","………………","……………Min","……………Max","……………Avg","Median","proc/sec"
+	printf	"%-6s|%12.2fms %12.2fms %12.2fms | %6.2fms %6.2f\n",	"Timing",Fmin,Fmax,Favg,Fmed, 1000/Fmed
+	print	"–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––"
+	print	"Median is what you get mostly"
+}
+' $FILES

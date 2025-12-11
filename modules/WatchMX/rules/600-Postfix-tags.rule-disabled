@@ -1,0 +1,30 @@
+#
+# Fetch postfix tags from postfix/cleanup
+# Assure postfix/cleanup is _NOT_ de-activated
+# in the superflouos_map file
+#
+RULE=__Campaign_Junk__
+Pattern='__Campaign_Junk__'
+#-------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 5; return $?; fi
+
+RULE=__Bitcoin_Junk__
+Pattern='__Bitcoin_Junk__'
+#-------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 5; return $?; fi
+
+RULE=__Generica_Junk__
+Pattern='__Generica_Junk__'
+#-------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 5; return $?; fi
+
+RULE=__Fake_domain__
+Pattern='__Fake_domain__'
+#-------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 5; return $?; fi
+
+RULE=__You_are_absorbed__
+Pattern='__You_are_absorbed__'
+#-------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 5; return $?; fi
+

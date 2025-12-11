@@ -1,0 +1,22 @@
+# ---------------------------------------------------
+# The 'superfluous_map' file is used to create a 
+#    'grep -E "entry1|entry2|entry3|...|entryN"' line
+# by the 'mk_superfluous' function in common.bashlib   
+#
+# Do NOT append comments to lines with entries!
+# Take care that there are no trailing spaces.
+# Special characters to regex must be quoted
+# ---------------------------------------------------
+# You may comment as you like in column 1
+	# or even indented with spaces and/or tabs
+# like shown here
+# ---------------------------------------------------
+# Note:
+# Entry lines are 'extended regular expressions' [ERE]
+# So regex operators must be quoted to match as text
+# Otherwise they cause syntactical errors and the module
+# fails to start.
+# Colons and spaces are treated as normal characters
+#
+# Use 'check-super' to check for syntactical errors
+# ---------------------------------------------------

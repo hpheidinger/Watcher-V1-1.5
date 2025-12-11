@@ -1,0 +1,212 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+# - GeoTrack -
+#
+# See if a given IP address is from a forbidden country
+#
+#-------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../../system.conf
+. ../../watchermap.conf
+. ../../common.conf
+. ../../common.bashlib
+. $ME.conf
+. private.bashlib
+. netcalc.bashlib	# Better take this from a common place
+#-------------------------
+LOADFILE=$POOL/ipset.Loadfile-$ME
+
+if [ -z "$DEBUG" ]
+then
+	if [ -z "$ENABLED" ]
+	then	MSG="$ME is not enabled; see $ME.conf"
+		log $MSG; trace $MSG; logger $MSG
+		exit 255
+	fi
+fi
+
+trap stopservice        TERM INT	# React on a 'TERM'
+trap rerun              KILL 9		# React on crash 
+trap 'errorexit $? $_'	EXIT
+
+errorexit() {
+local	funtag="[${FUNCNAME[0]}]"
+
+        logger	"$ME[$$]: $funtag trapped with exit code '$1', Cmd: '$2' ... Loop: $loop"
+        trace	"$funtag $ME trapped with exit code '$1', Cmd: '$2' ... Loop: $loop"
+        exit 255
+}
+
+stopservice() {
+local	funtag="[${FUNCNAME[0]}]"
+
+        logger	"$ME[$$]: $funtag Terminating on request ..."
+        trace	"$funtag Terminating on request ..."
+	cleanup
+        exit
+}
+
+rerun() {
+local	funtag="[${FUNCNAME[0]}]"
+
+        log     "$ME[$$]: $funtag Abnormal termination, exit status: $?, Loop; $loop"
+#       log     "Bandit: $BANDIT"
+        logger  "$ME[$$]: Restarting in a minute ..."
+        trace	"$funtag $ME Restarting in a minute ..."
+        echo	"$WHERE/$ME" | at "now + 1 minute"
+        exit
+}
+
+cleanup() {
+local funtag="[${FUNCNAME[0]}]"
+
+	PROC_END=`date +%s`
+#	PROC_TIME=`echo "scale=3; ($PROC_END-$PROC_START)/10^6" | bc`
+	PROC_TIME=$(( PROC_END-PROC_START ))
+#	logger "$ME[$$]: Finished: $PROC_TIME ms"
+	logger "$ME[$$]: Runtime: `date -u -d @"$PROC_TIME" +%T`"
+
+	rm -f $PIPE
+	logger "$ME[$$]: Removed pipe $PIPE ..."
+}
+
+load_ipset() {
+local funtag="[${FUNCNAME[0]}]"
+
+	# False (1) if not found ...
+	if ! $IPSET -n list $MYSET >/dev/null 2>&1
+	then mk-ipset $MYSET "$SETTYP" "$SETOPTS" >/dev/null 2>&1
+	fi
+
+	$IPSET flush $MYSET
+	$IPSET -file $LOADFILE restore
+}
+
+#----------------- Main -----------------------
+: echo "Where    : $WHERE"
+: echo "FiFo base: $FIFO_BASE"
+: echo "Pipe     : $PIPE"
+: echo "DB       : $DB"
+: echo "Table    : $TABLE"
+
+if [ ! -p $PIPE ]
+then mkfifo -m 600 $PIPE
+fi
+
+# Make a compare string from $ZONES for 'grep -E ...' 
+COUNTRIES=`awk '{print toupper($0)}' <<< $ZONES | tr ' ' '|'`
+
+PROC_START=`date +%s`
+logger	"$ME[$$]: Starting $ME ..."
+trace	"$ME[$$]: Starting $ME ..."
+
+renice -10 $$
+while :
+do
+	read < $PIPE
+	LOOP_START=`date +%s%3N`
+	(( loop++ ))
+	: echo "Loop $loop: "$REPLY
+	IPADDR=`awk '{print $1}' <<< $REPLY`
+	ORIGIN=`awk '{print $2}' <<< $REPLY`
+	COUNTRY=""
+	PROVIDER=""
+	RECORD=""
+	REF_RECORD=""
+
+	trace "[Loop: $loop] $IPADDR $ORIGIN"
+
+	# See what IANA says ...
+	REQSRC=IANA
+	PROV_URL=`ask_iana $IPADDR`
+
+	if [ -z "$PROV_URL" ]
+	then	trace "» No responsible from IANA ... guessing one ..."
+		REQSRC=Guess
+		PROV_URL=`guess_provider $IPADDR`
+	fi
+	
+	# Still no provider URL ??
+	if [ -z "$PROV_URL" ]
+	then	trace "» Cannot get a provider URL ... continuing ..."
+		continue
+	fi
+
+	RECORD="`whois -h $PROV_URL $IPADDR`"
+	REAL_URL=`set_whois_real $IPADDR $PROV_URL`
+
+	if [ -z "$REAL_URL" ]
+	then 	REAL_URL=$PROV_URL
+		trace "$REQSRC: $PROV_URL"
+	else		
+		REF_RECORD=`whois_referral`
+		RECORD="$REF_RECORD"
+		trace "$REQSRC: $PROV_URL »»»REF»»» $REAL_URL"
+	fi
+
+	PROVIDER=`mk_whois_token $REAL_URL`
+
+	#
+	# With no provider no country cann be determined
+	# ... write a fake record with <IPaddr>/32
+	# and skip the rest ...
+	if [ -z "$PROVIDER" ]
+	then	trace "» No provider for $IPADDR ... continuing"
+		inject_fake $IPADDR $ORIGIN
+		continue
+	fi
+
+	#
+	# OK ... have a provider, see for a country code next
+	#
+	countries=`grep -E '^[cC]ountry:' <<< "$RECORD" | awk '{print toupper($2)}'`
+	: echo "Countries   : '$countries'"
+	CLIST=`echo $countries`
+	: echo "Country list: "$CLIST
+
+	COUNTRY=`awk '{print toupper($1)}' <<< $CLIST`
+
+	CNAME=`$SQL "select name from ISO3166 where alpha_2='$COUNTRY';"`
+
+	# if no CNAME, then COUNTRY is not valid!
+	if [ -z "$CNAME" ]
+	then	trace "Invalid country '$COUNTRY'"
+		CNAME='__invalid__'
+	fi
+
+	trace "$IPADDR,$COUNTRY,"[$CLIST]",'$CNAME'"
+
+	FILT_START=`date +%s%3N`
+	if [ ! -z "$COUNTRY" ]
+	then
+		if [ ! -z "$GEOCOUNT" ]; then ./GeoCount $COUNTRY; fi
+
+		: echo	"$REPLY : "$COUNTRY [$CLIST]
+		logline=`printf "%-s,%-s,[%s],%-s,%s,{%s}" $IPADDR $COUNTRY "$CLIST" $ORIGIN $PROVIDER $REAL_URL`
+		log	$logline
+		trace	$logline
+
+		CULPRIT=`grep -E "$COUNTRIES" <<< $COUNTRY`
+		if [ ! -z "$CULPRIT" ]
+		then 	inject $IPADDR $CULPRIT $ORIGIN $PROVIDER
+		else	: trace "» $COUNTRY not a culprit ... continued «"
+			: continue
+		fi
+	else	trace "» No country code for $IPADDR ... continued «"
+		: continue
+	fi
+
+	FILT_END=`date +%s%3N`
+	FILT_TIME=$((FILT_END-FILT_START))
+	LOOP_TIME=$((FILT_END-LOOP_START))
+	trace "Finished loop $loop, $LOOP_TIME/$FILT_TIME ms"
+done
+
+# DEAD-End ... Reaching here triggers a trap that restarts us 
+rerun

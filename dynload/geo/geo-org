@@ -1,0 +1,194 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+# - Dynloader geo -
+### List are taken from 'https://ipdeny.com/ipblocks'
+### Updates are scheduled @ ~12:20,CET ..
+### 
+### Prefer the 'aggregated' zone files in
+###     https://ipdeny.com/ipblocks/data/aggregated/<xx>-aggregated.zone
+### as these subsummarize complete networks in CIDR format.
+### 
+### <xx> is the country code of the list you want
+#-------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+#-------------------------
+. ../../system.conf
+. ../../watchermap.conf
+. ../../common.conf
+. ../../common.bashlib
+. private.bashlib
+. $ME.conf
+
+trap cleanup	0 1 2 9 15
+
+cleanup() {
+local funtag="[${FUNCNAME[0]}]"
+
+	# UNCONDITIONALY fill-in to firewall
+	# what's in $ZONE_DIR
+	: echo "Updates: "$UPDATES
+	: echo "Updated: "$UPDATED
+	: echo "Missing: "$MISSING
+
+	# Fill in what we got so far
+	for zone in $ZONES
+	do fill_ipset $zone
+	done
+
+        PROC_END=`date +%s%N`
+        PROC_TIME=`echo "scale=3; ($PROC_END - $PROC_START)/10^6" | bc`
+        logger "$ME[$$]: Finished: $PROC_TIME ms'"
+        printf  " » %-15s ... finished in %8.2f ms\n" $ME $PROC_TIME
+
+	rm -f *.zone	# Remove relicts in the hook-dir
+	touch .lastrun
+}
+
+fill_ipset() {
+# $1 .. is the zone code: e.g. 'ru' for 'Russia', 'cn' for 'China' a.s.o ...
+#
+local   funtag="[${FUNCNAME[0]}]"
+local	THIS_SET=geo-$1
+local	ZONEFILE=$ZONE_DIR/$1$AGG_SUF 
+local	LOADFILE="$POOL/ipset.Loadfile-"$THIS_SET
+local	have_it
+
+	awk -v list=$THIS_SET -v settype="$SETTYPE" -v setopts="$SETOPTS" -v loadfile="$LOADFILE" ' 
+	/^[ \t]*[#]|^$/ { next }	# Ignore comments and empty lines
+			{ IP[$1]=$1 }
+	END {
+		printf "-exist create %s %s %s\n", list, settype, setopts > loadfile
+
+		for ( ip in IP ) {
+			printf "add %s %s comment \"%s\"\n", list, ip, list > loadfile
+		}
+	}
+	' $ZONEFILE
+
+	# Make IPSET on-the-fly ... if it does not already exists
+	have_it=`ipset -n list | grep $THIS_SET`
+	if [ -z "$have_it" ]
+	then mk-ipset $THIS_SET $SETTYPE $SETOPTS
+	fi
+
+	$IPSET flush $THIS_SET
+	$IPSET -file $LOADFILE restore
+}
+
+#------------ Main ----------------
+PROC_START=`date +%s%N`
+FIRSTRUN=0
+UPDATES=0
+UPDATED=''
+
+if [ ! -d $ZONE_DIR ]
+then
+	mkdir $ZONE_DIR
+	(( FIRSTRUN++ ))
+fi
+
+### Housekeeping ###########
+# Step 1
+# Delete zone files from $ZONE_DIR that no longer exist in $ZONES
+del_zones
+
+# Step 2
+# Get news zones to $ZONE_DIR that are not exist as of $ZONES
+# «Note»: On first run retrieves everything freshly 
+new_zones
+
+if [ $FIRSTRUN -ne 0 ]; then exit; fi	# Finish up in cleanup()
+
+### Updating ###############
+# Step 3 (final step)
+if [ -f MD5SUM ]
+then 	mv MD5SUM .laststamp
+else 	touch .laststamp
+fi
+
+$WGET -N $DAT_URL/MD5SUM
+
+if [ ! -s MD5SUM ]
+then
+	logger	"[$ME] ERROR: Failed to download MD5SUM from $DAT_URL – keeping old lists"
+	echo	"ERROR: Could not retrieve MD5SUM, exiting..."
+	exit	0	# Not tonight, Josephine ...
+fi
+
+fetchlist=`mk_fetchlist`
+
+if [ -z "$fetchlist" ]
+then	echo	"No effective update"
+	logger	"[$ME] No effecitve update."
+	exit
+else 	fetch_count=`wc -w <<< $fetchlist`
+	echo	"Update(s): $fetch_count, '$fetchlist'"
+	logger	"[$ME] Updatating $fetch_count zone files"
+fi
+
+#MD5stamp=`date --iso -r MD5SUM`
+#: echo "MD5SUM stamp : "$MD5stamp
+
+#LASTstamp=`date --iso -r .laststamp`
+#: echo "LAST stamp : "$LASTstamp
+
+#if [ "$LASTstamp" ==  "$MD5stamp" ]
+if cmp -s MD5SUM .laststamp
+then 	: echo no change, nothing to do ...
+	logger "[$ME] No changes, exiting $DAT_URL/..."
+	exit	# no change, nothing to do ...
+fi
+
+# If we are  reaching here, we are walking the update line ...
+# Check for updates ...
+logger "[$ME] Tracking $DAT_URL/..."
+#for zone in $ZONES
+for zonefile in $fetchlist
+do	
+	ZONEFILE=$zone$AGG_SUF
+	if [ -f $ZONE_DIR/$ZONEFILE ]
+	then
+		FILEstamp=`date --iso -r $ZONE_DIR/$ZONEFILE`
+		: echo "$zone: $FILEstamp, MD5stamp: $MD5stamp"
+		: echo "Seconds time diff: $DIFF"
+
+		if [ "$MD5stamp" == "$FILEstamp" ]
+		then
+			MSG="Zone file $ZONEFILE is up-to-date"
+			: echo	$MSG
+			logger  "[$ME] $MSG"
+		else	
+			# If the zone exists try to update it ...
+			MSG="Updating zone file $ZONEFILE from $DAT_URL"
+			: echo	$MSG
+			logger  "[$ME] $MSG"
+			#$WGET -N $DAT_URL/$ZONEFILE
+			fetch_zone $ZONEFILE
+			result=$?
+
+			case $result in
+				0)	(( UPDATES++ ))
+				;;
+				1)	msg	"Update of zone $zone failed"
+					echo	"$msg"
+					logger	"[$ME] $msg"
+			;;
+			esac		
+		fi
+	fi
+done
+
+# Report updates
+if [ $UPDATES -gt 0 ]
+then logger "[$ME] $UPDATES Updated: '$UPDATED'"
+else logger "[$ME] All zone files up-to-date"
+fi
+
+# New zones and updates applied in 'cleanup' on exit ...
+exit

@@ -1,0 +1,77 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+# - StatWB -
+#-------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../../system.conf
+. ../../watchermap.conf
+. ../../common.conf
+. ../../common.bashlib
+#-------------------
+. WatchWB.conf
+. private.bashlib
+
+STAMP="`date +%Y%m%d-%H.%M`"
+
+# From main DB
+$SQL -header -csv "
+	select date(date_event) as "Date", 
+		(SELECT COUNT(state) FROM $TABLE
+			WHERE state='INTRO' and date(date_event) = date(a.date_event) 
+			  and date(date_event) != current_date )	as "Introduction",
+		(SELECT COUNT(state) FROM $TABLE
+			WHERE state='COUNT' and date(date_event) = date(a.date_event)
+			  and date(date_event) != current_date )	as "Counted",
+		(SELECT COUNT(state) FROM $TABLE
+			WHERE state='DROP'  and date(date_event) = date(a.date_event)
+			  and date(date_event) != current_date )	as "Dropped"
+	from $TABLE a 
+		where date(date_event) != current_date 
+	group by "Date"
+	order by "Date"
+	;
+" > Statistics-WB.csv
+
+
+#---------------------------
+$SQL -header -csv "
+	select date(date_event) as "Date", 
+		(SELECT COUNT(web_class) FROM $TABLE
+			WHERE web_class='Bot' and date(date_event) = date(a.date_event) 
+			  and date(date_event) != current_date )	as "Bots",
+		(SELECT COUNT(web_class) FROM $TABLE
+			WHERE web_class='Aggressor' and date(date_event) = date(a.date_event)
+			  and date(date_event) != current_date )	as "Aggressor",
+		(SELECT COUNT(web_class) FROM $TABLE
+			WHERE web_class='Burglar'  and date(date_event) = date(a.date_event)
+			  and date(date_event) != current_date )	as "Break_in"
+	from $TABLE a 
+		where date(date_event) != current_date 
+	group by "Date"
+	order by "Date"
+	;
+" > Statistics-WB_by_webclass.csv
+
+#---------------------------
+
+# From affairs ...
+TABLE="affairs_by_ip"
+$SQL -header -csv "
+	select	* from $TABLE;
+" > Statistics-WB-Affairs_by_ip.csv
+
+mail -s Statistics-WB-$STAMP 			\
+-a Statistics-WB.csv				\
+-a Statistics-WB_by_webclass.csv		\
+-a Statistics-WB-Affairs_by_ip.csv		\
+$REPORTMAIL <<EOF
+Your statistics reports for '$ME' as of '$STAMP' in CSV format.
+See attachments.
+.
+EOF

@@ -1,0 +1,13 @@
+WEB_CLASS=Forbidden
+#---------------------
+
+RULE=401
+Pattern=' 401 '
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject; return $?; fi
+
+RULE=403
+Pattern=' 403 '
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject; return $?; fi
+

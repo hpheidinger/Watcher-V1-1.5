@@ -1,0 +1,50 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+# - Newbots -
+# Find new Bots not already in the badbots_map and whitebots_map
+####################################################################
+#------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../system.conf
+. ../common.conf
+. ../common.bashlib
+#------------------------
+#  Private stuff
+. ../conf/private/$ME.conf
+
+trap cleanup 0 1 2 15
+
+cleanup() {
+	rm -f /tmp/potential_bots.txt
+}
+
+# These globals moved into the conf file
+#LOGBASE="/var/www/logs"
+#WHITEBOT_MAP=$(Module wb)/rules/whitebots_map
+#BADBOT_MAP=$(Module wb)/rules/badbaots_map
+#NEWBOTS_OUT=$(Module wb)/rules/newbots_list
+
+> "$NEWBOTS_OUT"
+
+# Grep nach 'Bot' im User-Agent-Feld, extrahiere Wörter die auf 'Bot' enden (case-sensitive)
+# Beispiel: Apache combined log, User-Agent im letzten Feld (Anführungszeichen entfernen)
+# Wir holen uns User-Agent und parsen Bots
+
+grep -R '"[^"]*Bot[^"]*"' "$LOGBASE"/* | \
+awk -F'"' '{print $6}' | \
+grep -oE '\b[A-Za-z0-9_-]+Bot\b' | sort -u > /tmp/potential_bots.txt
+
+while read -r botname
+do
+	if ! grep -qxF "$botname" "$WHITEBOT_MAP" && ! grep -qxF "$botname" "$BADBOT_MAP"
+	then
+		echo "$botname" >> "$NEWBOTS_OUT"
+	fi
+done < /tmp/potential_bots.txt
+

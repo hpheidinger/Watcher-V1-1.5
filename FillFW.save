@@ -1,0 +1,75 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+#
+# - FillFW - (IPSETs)
+# Have a loadfile created by each module or dynloader
+# and load the firewall from this information
+#
+#------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. system.conf
+. common.conf
+. common.bashlib
+#------------------------
+
+logger "$ME[$$]: Started (re)loading firewall ..."
+
+
+# Load the local whitelist file
+# Establish link with ipset 'whitelist'
+# THIS MUST COME LAST to go on top in iptables as 'ACCEPT'!!!)
+#
+ipset -exist create whitelist 'hash:net' 'comment'
+if ! $IPTABLES -nL INPUT | grep "match-set whitelist" | grep -q ACCEPT
+then
+        $IPTABLES -t filter -I INPUT    -m set --match-set whitelist src -j ACCEPT
+        $IPTABLES -t filter -I FORWARD  -m set --match-set whitelist src -j ACCEPT
+fi
+
+#
+# Request load information from dynloaders & modules
+#
+. loader.conf
+
+#
+# Establish link with internal ipset DROP lists
+# Modules & Dynloaders do this 'on the fly'
+# NOTE: mk-ipset always creates DROP set
+#	Don't use for whitelist !!!
+mk-ipset blacklist 'hash:net'	'comment counters'
+mk-ipset tarpit    'hash:ip'	'comment counters timeout 60'
+mk-ipset custody   'hash:net'	'comment counters'
+mk-ipset hijackers 'hash:net'	'comment counters'
+
+# Load local blacklist file
+Blacklist
+
+# Load the local whitelist file
+# Establish link with ipset 'whitelist'
+# THIS MUST COME LAST to go on top in iptables as 'ACCEPT'!!!)
+#
+ipset -exist create whitelist 'hash:net' 'comment'
+if ! $IPTABLES -nL INPUT | grep "match-set whitelist" | grep -q ACCEPT
+then
+	$IPTABLES -t filter -I INPUT    -m set --match-set whitelist src -j ACCEPT
+	$IPTABLES -t filter -I FORWARD  -m set --match-set whitelist src -j ACCEPT
+fi
+
+# ... just call 'Whitelist'
+Whitelist
+
+# A dummy IPSET for validation of IP addresses (needed for DEBIAN/UBUNTU)
+# Establish a dummy ipset just for ip addr validation
+#
+# --- DON'T CONNECT THIS WITH IPTABLES! ---
+
+# Just 'add' and verify the return code 
+ipset -exist create validate 'hash:net' comment timeout 1
+
+logger "$ME[$$]: Finished - Firewall (re)loaded"

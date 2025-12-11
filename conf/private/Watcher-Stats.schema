@@ -1,0 +1,10 @@
+-- Watcher-Stats.schema – Schema for Watcher global statistics
+
+CREATE TABLE IF NOT EXISTS watcher_stats (
+	event_stamp	TEXT NOT NULL,
+	type		TEXT NOT NULL,
+	active		INTEGER,
+	total		INTEGER,
+	efficiency	REAL
+);
+

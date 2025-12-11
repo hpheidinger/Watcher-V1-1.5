@@ -1,0 +1,4 @@
+Script started on 2025-03-29 15:22:16+01:00 [TERM="xterm-256color" TTY="/dev/pts/0" COLUMNS="100" LINES="29"]
+bash: line 1: WatchLG: command not found
+
+Script done on 2025-03-29 15:22:16+01:00 [COMMAND_EXIT_CODE="127"]

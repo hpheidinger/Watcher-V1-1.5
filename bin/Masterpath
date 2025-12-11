@@ -1,0 +1,19 @@
+#!/bin/bash
+#################################################
+# - Masterpath -
+# Change to the configured MASTER_PATH
+# must be 'sourced' into an interactive shell
+# to work: i.e.  
+# . Masterpath
+# or as # cd `Masterpath`
+#################################################
+__ME=Masterpath
+__WHERE=`which $__ME`
+
+__link=`realpath $__WHERE`
+__path=`dirname $__link`
+__hook=`dirname $__path`
+if [ -d $__hook ]; then echo $__hook ;fi
+cd $__hook
+unset __ME
+unset __WHERE

@@ -1,0 +1,19 @@
+# source this into your interactive shell
+# while sitting on $MASTER_PATH
+# '. Masterpath && . hook-watcher'
+# to get convenient access to Watcher 
+if [ -z "$WATCHER_HOOK" ]
+then
+	. system.conf
+	. watchermap.conf
+	. common.conf
+	. common.bashlib
+#	. api/bash/iptables.bashlib
+	. api/bash/sql.bashlib
+	echo "««« Linked into Watcher world (hook mode)»»»"
+	readonly WATCHER_HOOK="yes"
+	export PS1="$PS1 HOOK »» "
+else	echo "««« Already in the Watcher world »»»"
+fi
+
+echo "To exit from 'hook mode' close the terminal!"

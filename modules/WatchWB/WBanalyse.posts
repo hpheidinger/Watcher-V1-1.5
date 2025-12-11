@@ -1,0 +1,9 @@
+166.108.200.194 POST /j_spring_security_check
+105.76.182.236 POST /bin/sh
+4.241.208.113 POST /wp-plain.php
+105.76.182.236 POST /php-cgi/php-cgi.exe?%ADd+cgi.force_redirect%3D0+%ADd+disable_functions%3D%22%22+%ADd+allow_url_include%3D1+%ADd+auto_prepend_file%3Dphp://input
+47.187.132.178 POST /xmlrpc.php
+5.230.72.124 POST /autodiscover/autodiscover.xml
+4.241.208.113 POST /ALFA_DATA/alfacgiapi/perl.alfa
+101.32.26.154 POST /php/connector.minimal.php
+4.241.208.113 POST /alfacgiapi/perl.alfa

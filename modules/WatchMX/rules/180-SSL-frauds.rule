@@ -1,0 +1,5 @@
+RULE=SMTPS
+Pattern='SSL_accept error from '
+#-------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject; return $?; fi
+

@@ -1,0 +1,63 @@
+#
+# - watcher.bashlib -
+#
+# Private functions for the watcher startup process ...
+
+# Conditions:
+# - The RAMdisk must be mounted to $POOL (defined in system.conf)
+# - All variables must be defined globally in watcher.conf
+# - no need for locals here
+#
+# *** Bail out if _anything_ is missing/lacking! **
+mkramdisk() {
+local funtag="[${FUNCNAME[0]}]"
+local	already
+
+	already=$(mount | grep "^$RDNAME" )
+
+	if [ -n "$already" ]
+	then	echo "RAMdisk '$RDNAME' already mounted"
+		return 1
+	fi	
+
+	# Safety check: No RAMDISK if not enabled
+	if [ -z "$USE_RAMDISK" ]
+	then	echo "RAMdisk-use not enabled"
+		return 1
+	fi
+
+	if [ -z "$POOL" ]
+	then	echo "$funtag ERROR: Mountpoint 'POOL' not specified"
+		return 1
+	fi
+
+	# Check if size and pool are defined
+	if [ -z "$RDSIZE" ]
+	then	echo "$funtag ERROR: 'RDSIZE' not defined in watcher.conf!" >&2
+		return 1
+	fi
+
+	# All conditions met - create and mount the beast ...
+	if [ -e "$POOL" ]
+	then	mount -t tmpfs -o size="$RDSIZE" "$RDNAME"  "$POOL"
+		echo "Built ${RDSIZE^^} RAMdisk '$RDNAME' on mountpoint $POOL"
+	fi
+
+	# Check if the RAMdisk is mounted or flag failure
+	already=$(mount | grep "^$RDNAME" )
+
+	if [ -z "$already" ]
+	then	echo "ERROR: Creating RAMdisk failed" >&2
+		return 1
+	else	
+		# Output RAMDISK info to file (this step would be the last)
+		cat > "$MASTER_PATH/RAMDISK" <<-EOF
+		: RamDisk established $(date --iso=seconds)
+		RAMDISK="'$RDNAME' on $POOL"
+		RDSIZE=${RDSIZE^^}
+		EOF
+	fi	
+}
+
+
+# vim: set filetype=sh noexpandtab tabstop=8 shiftwidth=8 autoindent smartindent :

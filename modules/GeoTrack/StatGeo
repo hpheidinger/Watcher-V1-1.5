@@ -1,0 +1,57 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+# - GeoTrack- StatGeo 
+#------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../../system.conf
+. ../../watchermap.conf
+. ../../common.conf
+. ../../common.bashlib
+#------------------------
+. GeoTrack.conf
+
+STAMP=`date +%Y%m%d-%H.%M`
+TABLE=geocount
+OUTFILE=Statistics-Geo_top10.csv
+$SQL -header -csv "
+	select 	a.country	AS "Country",
+		b.name		AS "Name",
+		a.count		AS "Count"
+	from $TABLE a, iso3166 b
+		where 	a.count > 10
+		  and	a.country = b.alpha_2
+	--	  and	date(a.lasttime) != current_date 
+	order by a.count desc
+	limit 20
+	;
+	" > $OUTFILE
+
+# Enquote 'Name' column strictly
+awk '
+@include "awklib.awk"
+BEGIN { FS=","; OFS="," }
+	{
+		if ( FNR != 1 ) $2=enquote($2)
+		print $1,$2,$3
+	}
+' $OUTFILE > $OUTFILE"-new"
+mv $OUTFILE"-new" $OUTFILE
+
+if [ "$1" == "mail" ]
+then
+	echo "Mailing Geo statistics to $REPORTMAIL"
+	mail -s Statistics-Geo-$STAMP		\
+	-a Statistics-Geo_top10.csv 		\
+	$REPORTMAIL <<- EOF
+	Your statistics report for '$ME' as of '$STAMP' in CSV format.
+	See attachments.
+	.
+	EOF
+fi	
+

@@ -1,0 +1,73 @@
+# - Berserks.bashlib -
+# API library for Berserks
+# Handles creation/loading of XDP/BPF maps from LOADFILE
+
+# Globals expected:
+#   LOADFILE   – path to xdp.Loadfile.*
+#   TARGET_IPSET – name of ipset processed (informational)
+#   POOL       – Watcher pool directory
+#   ME         – program name (Berserks)
+
+#--- helper: map format validator ---
+_bers_map_validate_line() {
+	sed -e 's/#.*//' -e 's/[ \t]*$//' | grep -E '^[0-9\.\/]+$'
+}
+
+###
+# Create the guts for XDP/BPF operaion
+###
+prepare() {
+# $1	- The IPSET name that is over-rules	
+local funtag="[${FUNCNAME[0]}]"
+local	caller_id=$(caller)
+
+	echo "$funtag Preparing XDP/BPF operation for $ME/$caller_id"
+	prepare_xdp
+	prepare_bpf
+	#probably other preparations
+	load_bpf
+}
+
+prepare_xdp() {
+local funtag="[${FUNCNAME[0]}]"
+:
+}
+
+prepare_bpf() {
+local funtag="[${FUNCNAME[0]}]"
+:
+}
+
+load_bpf() {
+local funtag="[${FUNCNAME[0]}]"
+:
+}
+
+
+#--- create BPF map from LOADFILE ---
+mk_bpf_map() {
+local funtag="[${FUNCNAME[0]}]"
+local	mapfile="$POOL/${ME}.bpfmap"
+local	tmpmap="$POOL/${ME}.bpfmap.tmp"
+
+	[ ! -s "$LOADFILE" ] && {
+		echo "$funtag: LOADFILE '$LOADFILE' is empty or missing"
+		return 0
+	}
+
+	# Normalize IP/CIDR entries and write to map
+	>"$tmpmap"
+	while IFS= read -r line; do
+		_valid=$(_bers_map_validate_line <<<"$line")
+		[ -z "$__valid" ] && continue
+		echo "$__valid" >>"$tmpmap"
+	done < "$LOADFILE"
+
+	mv "$tmpmap" "$mapfile"
+	echo "$ftag: written normalized BPF-map: $mapfile"
+
+	# Hook for future XDP loader logic
+	return 0
+}
+
+# vim: set filetype=sh noexpandtab tabstop=8 shiftwidth=8 autoindent smartindent :

@@ -1,0 +1,38 @@
+WEB_CLASS=Destroyer
+###############################
+
+# Illegal Method PROPFIND
+RULE=PROPFIND
+Pattern="GET /shell"
+#---------------
+#if [[ "$REPLY" =~ "$Pattern" ]]; then inject 5; return $?; fi
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=NMAP-Attack
+Pattern="(compatible; Nmap"
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=FAKE-Referer1
+Pattern="ALittle Client"
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=Dot-env
+Pattern="GET /.env"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=APP-Dot-env
+Pattern="GET /app/.env"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=Dot-git
+Pattern="GET /.git"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=Dot-aws
+Pattern="GET /.aws"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+

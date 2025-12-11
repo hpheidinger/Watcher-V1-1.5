@@ -1,0 +1,34 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+# - fixclass- Helper for WatchMX
+##############################################
+# Don't write with 'logger' to the maillog 
+# ... which ends up in recursion and crash ...
+##############################################
+#-------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../../system.conf
+. ../../watchermap.conf
+. ../../common.conf
+. ../../common.bashlib
+#-------------------------
+. WatchMX.conf
+. private.bashlib
+
+IPs=`$SQL "select IP from mailhogs where class='';"`
+
+echo $IPs
+
+for ip in $IPs
+do
+	CLASS=`get_class $ip`
+	echo "$ip $CLASS"
+
+	$SQL "update mailhogs set class='$CLASS' where IP='$ip';"
+done	

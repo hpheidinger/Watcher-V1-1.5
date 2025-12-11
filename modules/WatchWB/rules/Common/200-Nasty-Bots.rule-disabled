@@ -1,0 +1,154 @@
+## DONT USE any longer
+## Replaced by badbots_map
+
+# - 200-Nasty-bots.rule -
+
+WEB_CLASS=Bot
+###############################
+
+RULE=PALO-ALTO-1
+Pattern='@expanseinc.com'
+#---------------	
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=PALO-ALTO-2
+Pattern='Expanse, '
+#---------------	
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=Dataprovider
+Pattern='compatible; Dataprovider.com'
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=Petal-Bot
+Pattern='PetalBot;'
+#---------------	
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=Semrush-Bot
+Pattern='; SemrushBot'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=Ahrefs-Bot
+Pattern='; AhrefsBot/'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=Majestic-Bot
+Pattern='; MJ12bot/'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=SEO-Scanner.net
+Pattern='; adscanner/'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=Zoominfo-Bot
+Pattern='ZoominfoBot'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=Dot-Bot
+Pattern='compatible; DotBot/'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=Seznam-Bot
+Pattern='; SeznamBot/'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=Megaindex-BOT
+Pattern='compatible; MegaIndex.ru/'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=MailRU-Bot
+Pattern='; Mail.RU_Bot/'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=Well-Known-Bot
+Pattern='; WellKnownBot/'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=NC-Survey-Agent
+Pattern='compatible; NetcraftSurveyAgent/'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=BLEX-Bot
+Pattern='compatible; BLEXBot/'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=Barkrowler-Bot
+Pattern='compatible; Barkrowler/'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=SerpStat-Bot
+Pattern='serpstatbot/'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=Facebook-Bot
+Pattern='facebookexternalhit/'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=SEOkicks-Bot
+Pattern='(compatible; SEOkicks'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=BLEXBot
+Pattern='(compatible; BLEXBot/'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=Python-Request
+Pattern='python-requests/'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE="Spawning-AI"
+Pattern='"Spawning-AI"'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE="GeedoBot"
+Pattern='compatible; GeedoBot;'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE="DataForSeoBot"
+Pattern='compatible; DataForSeoBot/'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+
+RULE="Bytespider-Bot"
+Pattern='compatible; Bytespider'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE="Claude-Bot"
+Pattern='compatible; ClaudeBot/'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE="Censys-Inspect"
+Pattern='CensysInspect/'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE="Meta-Agent"
+Pattern='meta-externalagent/'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+

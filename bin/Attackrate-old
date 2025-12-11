@@ -1,0 +1,363 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+####################################################
+# - Attackrate -
+# Get 'attack rate' from modules' recent trace file
+####################################################
+#------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../system.conf
+. ../watchermap.conf
+. ../common.conf
+. ../common.bashlib
+#------------------------
+
+trap cleanup	0 2 15
+
+cleanup() {
+:	rm -f $TMPFILE
+}	
+
+from_traces() {
+local	funtag=${FUNCNAME[0]}
+
+	echo	"----------------------------------------------------------------"
+	printf	" Watcher $REVISION - Attack rate for module %s\n" $1
+	echo	" ... tracking recent trace files"
+	echo	"----------------------------------------------------------------"
+
+	awk -v modpath=$MODPATH -v module=$1 -v program=$ME '
+	@include "awklib.awk"
+	@include "statistics.awk"
+
+	#
+	# make time string xxdxxHxx:xxM:xxS.xxMS
+	# from milliseconds
+	function mk_timestr (ms,	S,d,h,m,s,mil) {
+	
+		S=int(ms/1000)
+		d=S/60/60/24
+		h=S/60/60%24
+		m=S/60%60
+		s=S%60
+		mil=ms-S*1000
+
+		return sprintf("%5dd%02d:%02d:%02d.%03d", d,h,m,s,mil)
+	}
+
+	#
+	# Build tickers from Watcher time stamps
+	# Sorted list of time stamps comes in arr
+	#
+	function mk_tickers (arr,	i,cnt,size,last,ticker) {
+
+		size=arr_size(arr)
+		for (i=1; i<=size; i++) {
+			cmd="date -d "arr[i]" +%s%3N"
+			cmd | getline ticker; close(cmd)
+			#print "Got stamp  :",arr[i]
+			#print "made ticker:",ticker
+
+			if (last == "") { last=ticker; continue }
+			if (ticker < last) continue
+
+			cnt++;
+			diff=ticker-last
+			tickers[cnt]=ticker
+			diffs[cnt]=diff
+
+			last = ticker
+		}
+	}
+
+	#
+	# Determine number of attacks by date
+	#
+	function mk_csv(date_arr,stamp_arr,	i,idx,size,d) {
+		for (d in date_arr) { date_arr[d]=0 }
+
+		# Stamps is a indexed/sorted list ...
+		#print "Stamps ..."
+		size = arr_size(stamp_arr)
+		
+		for (i=1; i <= size; i++) {
+			split(stamp_arr[i],parts,"T")
+			date_arr[parts[1]]++
+		}
+
+		#print "CSV Dates ..."
+		idx=0
+		for (d in date_arr) {
+			idx++
+			dates_csv[idx] = d", "date_arr[d]
+		}
+
+		asort(dates_csv)
+		#return dates_csv
+	}
+
+	BEGIN {
+		src_type="Traces"
+
+		counter=0
+		statfile=modpath"/Statistics-"module"-"program"-"src_type".csv"
+	}
+	/(Triggered by rule)/	{
+					counter++
+					split($0,parts,"T")
+					date=parts[1]
+					dates[date]=date
+					stamps[counter]=$1
+				}
+	END {
+		asort(stamps)
+		num_dates	= arr_size(dates)
+		min_date	= arr_min(dates)
+		max_date	= arr_max(dates)
+
+		# Make tickers from  Watcher timestamps
+		# Return filled diffs array
+		mk_tickers(stamps)
+
+		# tickers & diffs are set up
+		# diffs holds the time diffs between tickers
+		num_tickers=arr_size(tickers)
+
+		tickers_min	= arr_min(tickers)
+		tickers_max	= arr_max(tickers)
+
+		diffs_min	= arr_min(diffs)
+		diffs_max	= arr_max(diffs)
+		diffs_mean	= mean(diffs)
+		diffs_median	= median(diffs)
+		diffs_mode	= mode(diffs)
+
+		printf "Reporting covers : %s ... %s, %d days\n", min_date, max_date, num_dates
+		printf "Total attacks    : %15d\n",counter
+		printf "Min	in Diffs : %15d\n", diffs_min
+		printf "Max	in Diffs : %15d\n", diffs_max
+		printf "Mode	in Diffs : %15d\n", diffs_mode
+		printf "AVG	in Diffs : %15d\n", diffs_mean
+		printf "Median	in Diffs : %15d\n", diffs_median
+
+		print	"--------------------------- Time diffs of attacks --------------------------"
+		printf	"%15s --|%15s --|%15s --|%15s --|\n", "Min", "Max", "Avg", "Median"
+		printf	"%15d ms|%15d ms|%15d ms|%15d ms|\n", diffs_min, diffs_max, diffs_mean, diffs_median
+		printf	"%16s|", mk_timestr(diffs_min)
+		printf	"%16s|", mk_timestr(diffs_max)
+		printf	"%16s|", mk_timestr(diffs_mean)
+		printf	"%16s|", mk_timestr(diffs_median)
+		printf	"\n"
+		print	"(Median is what you get mostly)"
+
+		# Count up stamps by date ...
+		# returns filled dates_csv
+		mk_csv(dates,stamps)
+
+		print "Module-"module",Attacks" > statfile
+		for (n in dates_csv) {
+			print dates_csv[n]  > statfile
+		}
+
+		print "Statistics file written to", statfile
+	}
+	' $FILES
+}
+
+from_db() {
+local	funtag="[${FUNCNAME[0]}]"
+
+	echo	"----------------------------------------------------------------"
+	printf	" Watcher $REVISION - Attack rate for module %s\n" $1
+	echo	" ... tracking database entries"
+	echo	"----------------------------------------------------------------"
+
+#	TMPFILE=$POOL/tmp.$ME-$(date +%s)
+	TMPFILE=/var/tmp/tmp.$ME-$(date +%s)
+
+	cd $MODPATH
+	source Watch$1.conf
+	: echo "DB   : "$DB
+	: echo "Table: "$TABLE
+	: echo "SQL  : "$SQL
+	$SQL -csv "select date(event_date), time_useconds from affairs_by_ip;" > $TMPFILE
+	cd - >/dev/null 2>&1
+
+	awk -v modpath=$MODPATH -v module=$1 -v program=$ME '
+	@include "awklib.awk"
+	@include "statistics.awk"
+	
+	# make time string xxdxxHxx:xxM:xxS.xxMS
+	# from milliseconds
+	function mk_timestr (ms,	S,d,h,m,s,mil) {
+	
+		S=int(ms/1000)
+		d=S/60/60/24
+		h=S/60/60%24
+		m=S/60%60
+		s=S%60
+		mil=ms-S*1000
+
+		return sprintf("%5dd%02d:%02d:%02d.%03d", d,h,m,s,mil)
+	}
+
+	# Rebuild Watcher stamps from tickers in micro seconds
+	# arr is a list of "micro seconds since epoch"
+	# Turn to msecs and write the stamps array and
+	# convert the tickers to a list of Watcher time stamps
+	function mk_stamps (arr,	a,last,ticker,cnt,stamp,diff) {
+		for (a in arr) {
+			ticker=arr[a]
+			# Handle first thing since it has no last
+			if (last == "") { last=ticker; continue }
+
+			cnt++
+			seconds		= int(ticker/1000000)
+			millisec	= int(ticker/1000)
+			frac		= ticker-millisec*1000
+
+			cmd="date -d @" seconds " +%Y-%m-%dT%T"
+			print cmd
+			cmd | getline tmp_stamp; close(cmd)
+
+			stamp=sprintf("%s.%03d",tmp_stamp,frac)
+			stamps[cnt]	= stamp
+
+			diffs[cnt] 	= ticker-last	# diff in useconds
+
+			last 		= ticker
+		}
+	}
+
+	#
+	# Determine number of attacks by date
+	#
+	function mk_csv(date_arr, stamp_arr,	i,idx,size,d) {
+		for (d in date_arr) { date_arr[d] = 0 }
+
+		# Stamps is a indexed/sorted list ...
+		#print "Stamps ..."
+		size = arr_size(stamp_arr)
+		
+		for (i=1; i <= size; i++) {
+			split(stamp_arr[i],parts,"T")
+			date_arr[parts[1]]++
+		}
+
+		#print "CSV Dates ..."
+		idx=0
+		for (d in date_arr) {
+			idx++
+			dates_csv[idx] = d", "date_arr[d]
+		}
+
+		asort(dates_csv)
+	}
+
+	BEGIN {
+		cnt=0
+		FPAT = "([^,]+)|(\"[^\"]+\")"
+		src_type="DB"
+		statfile=modpath"/Statistics-"module"-"program"-"src_type".csv"
+		print "Will write ouput to",statfile
+	}	
+		{ useconds[++cnt] = $2 }
+	END {
+		print "Processing results"
+		# Make Watcher timestamps tickers in useconds
+		# Returns the stamps array
+		mk_stamps(useconds)
+
+		# Cumulate attacks to dates
+		for (s in stamps) { 
+			split (stamps[s], parts," ")
+			dates[parts[1]]=parts[1]
+		}
+
+		print "Cummulation done ..."
+		
+		min_date	= arr_min(dates)
+		max_date	= arr_max(dates)
+		num_dates	= arr_size(dates)
+
+		num_diffs	= arr_size(diffs)
+		diffs_min	= arr_min(diffs)
+		diffs_max	= arr_max(diffs)
+		diffs_mean	= mean(diffs)
+		diffs_median	= median(diffs)
+		diffs_mode	= mode(diffs)
+
+		printf "Reporting covers   : %s ... %s, %d days\n", min_date, max_date, num_dates 
+		printf "Total attacks      : %15d\n", cnt
+		#printf "# Diffs            : %15d\n", num_diffs
+		printf "Min	in diffs   : %15d\n", diffs_min
+		printf "Max	in diffs   : %15d\n", diffs_max
+		printf "Mode	in diffs   : %15d\n", diffs_mode
+		printf "Mean	in diffs   : %15d\n", diffs_mean
+		printf "Median	in diffs   : %15d\n", diffs_median
+
+		print	"-------------------------- Time diffs of attacks --------------------------"
+		printf	"%15s --|%15s --|%15s --|%15s --|\n", "Min", "Max", "Avg", "Median"
+		printf	"%15d ms|%15d ms|%15d ms|%15d ms|\n", diffs_min, diffs_max, diffs_mean, diffs_median
+		printf	"%16s|", mk_timestr(diffs_min)
+		printf	"%16s|", mk_timestr(diffs_max)
+		printf	"%16s|", mk_timestr(diffs_mean)
+		printf	"%16s|", mk_timestr(diffs_median)
+		printf	"\n"
+		print	"(Median is what you get mostly)"
+
+		mk_csv(dates,stamps)
+
+		# Print "Result CSV ...."
+		print "Module-"module",Attacks" > statfile
+		for (n in dates_csv) {
+			print dates_csv[n] > statfile
+		}
+		
+		print "Statistics written to file ",statfile
+	}
+	' $TMPFILE
+}
+
+usage() {
+	echo "Usage:"
+	echo "$ME [-d|-t] <module>"
+	printf "%10s ... %s\n" "-d"		"from database"
+	printf "%10s ... %s\n" "-t"		"from trace files"
+	printf "%10s ... %s\n" "<module>" 	"module to measure (LG,MX,WB)"
+	echo "Example: # $ME -t MX"
+	exit
+}
+
+echo "««« $ME is experimental »»»"
+: echo "AWKpath: $AWKPATH"
+: echo "PATH: $PATH"
+while getopts :t:d:h opts
+do
+	case $opts in
+		t)	[[ $OPTARG == "" ]] && usage
+			#TOKEN=`awk '{ print toupper($0) }' <<< $OPTARG`
+			TOKEN=${OPTARG^^}
+			MODPATH="../modules/Watch$TOKEN"
+			FILES=$MASTER_PATH/modules/Watch$TOKEN/Watch$TOKEN.trace-*
+			from_traces 	$TOKEN $FILES
+		;;
+		d) 	[[ $OPTARG == "" ]] && usage 
+			#TOKEN=`awk '{ print toupper($0) }' <<< $OPTARG`
+			TOKEN=${OPTARG^^}
+			MODPATH="../modules/Watch$TOKEN"
+			from_db		$TOKEN
+		;;
+		'h')	usage
+	;;
+	esac
+done
+if [ $OPTIND -eq 1 ]; then usage; fi
+
+# shift $((OPTIND-1))

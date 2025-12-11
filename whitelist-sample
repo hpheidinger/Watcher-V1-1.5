@@ -1,0 +1,25 @@
+#
+# Watcher (sample)
+# - White list -
+#
+aaa.bbb.ccc.ddd		# Our own IP
+127.0.0.1		# Our localhost address
+
+#-----------------------------------------
+# The outer space ... entire networks CIDR
+#-----------------------------------------
+10.0.0.0/8		# Our VPN
+
+#---------------------------------------------
+# The outer space ... specific hosts
+#---------------------------------------------
+8.8.8.8			# Google's master DNS
+8.8.8.4			# Google's slave  DNS
+10.0.1.1		# VPN server, tunnel 1
+10.0.1.2		# VPN client, tunnel 1
+10.0.2.1		# VPN server, tunnel 2
+10.0.2.2		# VPN client, tunnel 2
+10.0.3.1		# VPN server, tunnel 3
+10.0.3.2		# VPN client, tunnel 3
+10.0.4.1		# VPN server, tunnel 4
+10.0.4.2		# VPN client, tunnel 4

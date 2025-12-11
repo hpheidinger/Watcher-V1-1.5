@@ -1,0 +1,14 @@
+# ----------------------------------------------------
+# - superfluous_map -
+#      WB Module
+#
+# See README-superfluous_map for detailed explanations.
+# ----------------------------------------------------
+SELF-TEST
+
+# Supress legal http error codes
+# Note, that there is a quoted space at the end!
+\ 200\ 
+\ 301\ 
+\ 302\ 
+\ 304\ 

@@ -1,0 +1,22 @@
+#!/bin/bash
+
+# Alle Backups auflisten, sortieren (ältestes zuerst)
+BACKUPS=($(ls -t bandits.db-* 2>/dev/null | sort))
+
+# Falls es mehr als ein Backup gibt, das älteste behalten und den Rest löschen
+if [ "${#BACKUPS[@]}" -gt 1 ]; then
+    KEEP="${BACKUPS[0]}" # Ältestes Backup behalten
+    echo "Behalte: $KEEP"
+    
+    for FILE in "${BACKUPS[@]:1}"
+    do
+        echo "Lösche: $FILE"
+        rm -f "$FILE"
+    done
+else
+    echo "Kein altes Backup zum Löschen gefunden."
+fi
+
+rm -f bandits.db-new
+rm -f bandits.db-inter
+cp $KEEP bandits.db

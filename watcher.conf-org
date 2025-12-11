@@ -1,0 +1,179 @@
+#
+# -watcher.conf -
+#
+# Introduce to the Watcher world ...
+#
+# Watcher revsion
+#
+PRODUCT=WatcherV1
+#REVISION=1.4beta
+#REVISION=1.4RC1
+#REVISION=1.4RC2
+REVISION=1.4Pre
+
+# Ports that modules are related to
+# Mainly used in 'Watcher-Report' 
+WATCHER_PORTS="22 25 80 110 143 443 465 587 993 995"
+WATCHER_CHAIN="WATCHCNT"
+
+# Specify the modules TO BE STARTED
+#
+# Note:	If 'WatchMX' is used its companion 'WatchMB'
+# 	is automatically started by WatchMX
+# 	No need to include 'WatchMB' here
+# 	
+# Example: 
+# MODULES="WatchLG WatchMX"
+#-----------------------------------------
+MODULES="WatchLG WatchMX WatchWB GeoTrack"
+
+#
+# Set 'USE_RAMDISK' to a 
+#     _NON-EMPTY_STRING_
+# to use it
+# Leave it blank to disable it.
+#
+USE_RAMDISK=UhhYeah
+
+# Configure RAM disk size in bytes; e.g. '20m' for 20 mega-bytes
+# size can have multipliers for:
+# - {k,K} (kilobytes), 
+# - {m,M} (megabytes),
+# - {g,G} (gigabytes)
+RDSIZE=20m
+
+# Copy some frequently used tools to the RAM disk at $POOL/bin for speed-up
+USE_RDCOPIES=UhhYeah
+
+# List of RAMDisk copies to be used in PATH
+RDCOPIES='awk grep date ipset sqlite3 logger'
+
+# Path where common tools are linked by the master and modules
+# Should be included in the PATH variable for 'root'
+TOOLS_LINK=/usr/local/sbin
+TOOLS='
+Attackrate	Blacklist	Check		Dynload
+Freeme		Huntip		Jump		Looprate
+Masterpath	Module		MyFritzBox	MyRouter
+Procrate	Refresh		Restart		Rules
+SetDebug	Sqlrate		SqlTrace	TidyDB
+Totalnodes	Trace		Untreated	Watcher-Report
+Whitelist
+'
+
+# Base directory for the FIFOs (named pipes)
+# # --------------------------------------------------------------
+# # NOTE: System loggers (rsyslog & syslog-ng as well) are
+# #       _not_ permitted to write outside the standard log 
+# #       directory '/var/log' by SElinux rules.
+# #       There is no other choice here to place them in 
+# #	  /var/log/...
+# # --------------------------------------------------------------
+FIFO_BASE="/var/log/.pipes"
+
+####################################################
+### Do not change anything below! ##################
+####################################################
+# Export some important stuff
+# Be careful when changing this!
+export PRODUCT REVISION TOOLS_LINK FIFO_BASE
+
+pathmunge() {
+# $1	path to munge
+# $2	where to add the PATH entry default: 'beginning'
+local	haveit=0	
+
+	# No redundant PATH entries
+	[[ "$PATH" =~ "$1:"	]] && (( ++haveit ))
+	[[ "$PATH" =~ ":$1"	]] && (( ++haveit ))
+	# Should not ever happen by us - but is possible
+	[[ "$PATH" =~ ":$1:"	]] && (( ++haveit ))
+
+	if [ $haveit -gt 0 ]
+	then :	echo "Redundant PATH entry! ... skipping"
+		return 1
+	else
+		case ":${PATH}:" in
+			*:"$1":*)
+			;;
+			*)	if [ "${2:-}" = "after" ]
+				then PATH=$PATH:$1
+				else PATH=$1:$PATH
+				fi
+		;;
+		esac
+	fi
+}
+
+new_pathmunge() {
+# $1	Pfad zum Einfügen
+# $2	optional: "after" = ans Ende, sonst an den Anfang
+local	pathentry="$1"
+local	haveit=0
+
+	[[ ":$PATH:" == *":$pathentry:"* ]] && (( ++haveit ))
+
+	if [ $haveit -gt 0 ]
+	then	echo "Redundant PATH entry '$pathentry' ... skipping"
+		return 1
+	else
+		if [ "${2:-}" = "after" ]
+		then PATH="$PATH:$pathentry"
+		else PATH="$pathentry:$PATH"
+		fi
+	fi
+}
+
+
+#
+# Link APIs into PATH ...
+#
+if [[ -z "${HAVE_AWKPATH:-}" ]]
+then
+	if [ -z "${AWKPATH:-}" ]
+	then AWKPATH=$MASTER_PATH/api/awk
+	else AWKPATH=$MASTER_PATH/api/awk:$AWKPATH
+	fi
+	export HAVE_AWKPATH=set
+fi
+
+if [[ -z "${HAVE_BASHLIB:-}" ]]
+then
+	if [ -z "${BASHLIB:-}" ]
+	then
+		if [ -z "${BASHLIB:-}" ]
+		then	BASHLIB=$MASTER_PATH/api/bash
+		else	BASHLIB=$MASTER_PATH/api/bash:$BASHLIB
+		fi
+		export HAVE_BASHLIB=set
+	fi
+fi
+
+if [[ "$WATCHER_MODE" == 'module' ]]
+then	
+	[ -e $(Masterpath)/RAMDISK ] && . $(Masterpath)/RAMDISK 
+fi
+
+#
+# Provide extended Watcher path ...
+#
+if [[ -z "${HAVE_PATHSET:-}" ]]
+then
+	if [ -z "${HAVE_PATHSET:-}" ]
+	then
+		pathmunge $TOOLS_LINK
+		pathmunge $MASTER_PATH/bin
+		pathmunge $BASHLIB
+		pathmunge $AWKPATH
+
+		if [ -z "$POOLBIN" ]
+		then	pathmunge $POOLBIN
+		fi
+		export HAVE_PATHSET=set
+	fi
+fi
+
+export PATH AWKPATH BASHLIB
+
+# vim: set filetype=sh noexpandtab tabstop=8 shiftwidth=8 autoindent smartindent :
+

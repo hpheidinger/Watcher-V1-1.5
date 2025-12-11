@@ -1,0 +1,5 @@
+RULE="NXdomain-TLS"
+Pattern='Anonymous TLS connection established from unknown['
+#---------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 5; return $?; fi
+

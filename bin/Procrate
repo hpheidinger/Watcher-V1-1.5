@@ -1,0 +1,114 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+####################################################
+# - Procrate -
+# Get average processing rate from a modules' recent
+# trace file* (<MODULE>.trace*)
+####################################################
+#------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../system.conf
+. ../watchermap.conf
+. ../common.conf
+. ../common.bashlib
+#------------------------
+
+if [ -z "$1" ]
+then
+	echo "Usage: $ME xx"
+	echo "Specify which module to measure: LG, MX, MB, WB or GE (for GeoTrack) ..."
+	exit
+else	TRACETOKEN=${1^^}
+fi
+
+case $TRACETOKEN in
+	LG|MB|MX|WB)	FILEPAT="Watch$TRACETOKEN/Watch$TRACETOKEN.trace*"
+	;;
+	GE*)		FILEPAT='GeoTrack/GeoTrack.trace*'
+;;
+esac
+
+eval FILES=$MASTER_PATH/modules/$FILEPAT
+echo 	"-------------------------------------------------------------------------"
+printf	"Watcher $REVISION - Processing rate for module: %s\n" $TRACETOKEN
+echo 	"-------------------------------------------------------------------------"
+
+awk '
+@include "../api/awk/awklib.awk"
+@include "../api/awk/statistics.awk"
+BEGIN { 
+	min_loop=10000000
+	min_filt=10000000
+	max_filt=max_loop=0
+	count=0
+	sum_loop=0
+	sum_filt=0
+}
+#			{ if ( FNR == 1 ) print FILENAME }
+#/(Finished )/		{	#print $0
+/pro\] .*( ms)$/	{	#print $0
+
+				timing=$(NF-1)
+				split (timing, tim, "/")
+
+				#print tim[1], tim[2]
+				if ( tim[1]=="" || tim[2]=="" ) next
+
+				if ( tim[1] > 2000 ) {
+			#		print "»» Excessive and unplausible processing time! ... skipping ..."
+			#		print $0
+			#		print "File, Line: ",FILENAME,NR
+					next
+				}
+
+				++count
+				loop[count]=tim[1]
+				filt[count]=tim[2]
+
+				sum_loop += tim[1]
+				sum_filt += tim[2]
+			}
+END {
+#	asort(loop)
+#	asort(filt)
+
+	# Supress a division-by-0 error
+	if ( count == 0 ) {
+		print "No records ... exiting"
+		exit
+	}
+
+	Lmin=arr_min(loop)
+	Lmax=arr_max(loop)
+
+	Fmin=arr_min(filt)
+	Fmax=arr_max(filt)
+
+	Lavg=average(loop)
+	Favg=average(filt)
+
+	Lmed=median(loop)
+	Fmed=median(filt)
+
+	print	"Records:", count
+	print	"-------------------------------------------------------------------------"
+	printf	"%-6s|%14s %14s %14s | %8s %8s\n",			"","Min","Max","Avg","Median","proc/sec"
+	printf	"%-6s|%12.2fms %12.2fms %12.2fms | %6.2fms %6.2f\n",	"Loop",Lmin,Lmax,Lavg,Lmed, 1000/Lmed
+	printf	"%-6s|%12.2fms %12.2fms %12.2fms | %6.2fms %6.2f\n",	"Filter",Fmin,Fmax,Favg,Fmed, 1000/Fmed
+	print	"-------------------------------------------------------------------------"
+	print	"Median is what you get mostly"
+
+#	for (l in loop) {
+#		print loop[l] > "loop_arr"
+#	}	
+#	for (f in filt) {
+#		print filt[f] > "filt_arr"
+#	}	
+}
+' $FILES

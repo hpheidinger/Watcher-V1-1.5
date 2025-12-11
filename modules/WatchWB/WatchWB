@@ -1,0 +1,321 @@
+#!/bin/bash
+if [ "$1" = 'debug'  ]; then set -x;	_DEBUG="$1";	shift; fi 
+if [ "$1" = 'debug2' ]; then set -xvT;	_DEBUG="$1";	shift; fi 
+if [ "$1" = 'trace'  ]; then 		_TRACE="$1";	shift; fi 
+#################################################################
+# - WatchWB - 
+# Trace WEB hogs ...
+#################################################################
+#------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+#------[ Core stuff] -------
+. ../../system.conf
+. ../../watchermap.conf
+. ../../common.conf
+. ../../common.bashlib
+#------[ API stuff] -------
+. ../../api/bash/sql.bashlib
+#------[ Private stuff] -------
+. private.bashlib
+. $ME.conf
+
+trap refresh	        	HUP		# React on a 'HUP' and refresh 'filter'
+trap stopservice        	TERM INT	# React on a 'TERM' (15) and CTL-C in debug mode
+trap rerun			KILL 9		# React on crash 
+trap 'errorexit $? $_'		EXIT
+
+load_filter() {
+# $1 .. filter state
+local funtag="[${FUNCNAME[0]}]"
+local	rs sets
+
+	rm -f 'ruleset-*'
+
+        ./mkrulesets $1
+	sets=`echo ruleset-*`
+
+	trace "$funtag (Re)loading rulesets"
+	for rs in $sets
+	do source $rs
+	done
+
+	# Read map for superfluous stuff
+	SUPERFLUOUS=`mk_superfluous`
+
+	# Read map for badbots 
+	BADBOTS=`mk_badbots`
+	
+	# Read map of whitelisted bots
+	WHITEBOTS=`mk_whitebots`
+}
+
+refresh() {
+local funtag="[${FUNCNAME[0]}]"
+local sets
+
+	trace   "$funtag Refreshing rulesets for $ME ..."
+	logger  "$ME[$$]: $funtag Refreshing rulesets for $ME ..."
+
+	load_filter $funtag
+}
+
+errorexit() {
+local	funtag="[${FUNCNAME[0]}]"
+
+        logger	"$ME[$$]: $funtag Trapped with $1 ... Cmd: '$2', Loop: ${LOOP:-}"
+        trace	"$funtag Trapped with $1 ... Cmd: '$2', Loop: ${LOOP:-}"
+        exit 255
+}
+
+stopservice() {
+local	funtag="[${FUNCNAME[0]}]"
+        logger	"$ME[$$]: $funtag Terminating on request ..."
+        trace	"$funtag Terminating on request ..."
+        exit
+}
+
+rerun() {
+local	funtag="[${FUNCNAME[0]}]"
+
+        log     "$ME: $funtag Abnormal termination, exit status: $?, Loop; $LOOP"
+#       log     "$funtag Line was: '$REPLY'"
+#       log     "$funtag Rule was: [$RULE] '$Pattern'"
+        logger  "$ME[$$]: $funtag Restarting in a minute ..."
+        trace	"$funtag Restarting in a minute ..."
+        echo	"$WHERE/$ME" | at "now + 1 minute"
+        exit
+}
+
+
+#------------------ Main ----------------------------------
+dump_runtime
+config_table $DB
+
+trace	"--- $ME started on $HOSTNAME ... $SYSTEM $SYSVERS"
+trace   "Watcher: $PRODUCT, $REVISION ${1:-}"
+
+THIS_IP=`dig +short $HOSTNAME`  # Bash knows HOSTNAME
+
+# Set 'time slice' if missing or empty
+#if [ -z "$TIME_SLICE" ]; then TIME_SLICE=60; fi
+: "${TIME_SLICE:=60}"
+
+if [ ! -p $PIPE ]
+then mkfifo -m 600 $PIPE
+fi
+
+touch $LOG;		chmod 600 $LOG
+touch $ME.trace;	chmod 600 $ME.trace
+touch $ME.sql_trace;	chmod 600 $ME.sql_trace
+
+ln -sf $WHERE/WBinjector $TOOLS_LINK
+ln -sf $WHERE/WBinstance $TOOLS_LINK
+
+# Load filters
+load_filter Initial
+
+logger	"$ME[$$]: Started listening on pipe $PIPE using dynamic filters"
+log	"Started listening on pipe $PIPE using dynamic filters"
+trace	"Started listening on pipe $PIPE using dynamic filters"
+trace	"DB calls: $SQL"
+
+renice -10 $$
+
+#declare -F > Function-dump
+
+trace "Starting scanner ..."
+while :	# Only a crash can stop us ...
+do
+
+	[ -e $DB-new ] && pickDB-new
+
+	# Reset some globals for next loop ...
+	# Will be set at the top of a rule set in ../rules
+	CLASS=Httpd
+	WEB_CLASS='_unknown_'
+	RULESET=''
+	RULE=''
+
+	read < $PIPE
+	((LOOP++))
+	: echo "-------- Loop: $LOOP ----------"
+	LOOP_START=`date +%s%3N`
+
+	read DYN_ADDR < $LOG_DIR/DYN_IP
+
+	if [ -z "$REPLY" ]
+	then	: echo "Eeek! Empty line ..."
+		continue
+	fi
+
+
+	#############################################
+	# Preprocessor (Internal Rule set) 
+	#############################################
+	STAGE="[prepro]"
+	RULESET=Internal
+
+        # » Must come FIRST of all «
+        # Log lines w/o IP addr make no sense
+        RULE=IPpresent
+                BANDIT=`get_bandit`
+                if [ -z "$BANDIT" ]
+                then    : trace "No IP addr ... skipped"
+                        continue
+                fi
+	
+	# Kick off badbots first ... or they get a free ticket
+	# if coming along with a ' 200 ' HTTP request due to
+	# the superfluous_map conventions
+	RULE=Badbots
+		[[ "$REPLY" =~ ($BADBOTS) ]]
+		this_bot=${BASH_REMATCH[0]}
+
+		if [ -n "${BASH_REMATCH[0]}" ]
+		then	: echo "Badbots kicked off instantly ..."
+			dump_loadrate
+			Pattern="${BASH_REMATCH[0]}"
+			trace "[Loop: $LOOP] '$REPLY'"
+			trace "$STAGE Triggered by [$RULESET/$RULE] '$Pattern'"
+			FILT_START=`date +%s%3N`
+			WEB_CLASS=Bot
+			kickoff
+			FILT_END=`date +%s%3N`
+			FILT_TIME=$(( FILT_END - FILT_START ))
+			LOOP_TIME=$(( FILT_END - LOOP_START ))
+			trace "$STAGE Finished $BANDIT, [$RULESET/$RULE] $LOOP_TIME/$FILT_TIME ms"
+			continue
+		fi
+
+	# Whitelist hosts allowed to pick robots.txt & stuffs
+	# ... others will be shot by a rule
+	RULE=Whitebots
+		[[ "$REPLY" =~ ($WHITEBOTS) ]]
+		this_bot=${BASH_REMATCH[0]}
+
+		if [ -n "${BASH_REMATCH[0]}" ]
+		then	: echo "Whitelisted for robots.txt & stuff  ..."
+			FILT_START=`date +%s%3N`
+			WEB_CLASS=Bot
+			dump_loadrate
+			ipset -exist add passthru $BANDIT comment "passthru,$RULE,$this_bot"
+			#ipset -exist add whitelist $BANDIT comment "whitelisted,$RULE,$this_bot"
+			FILT_END=`date +%s%3N`
+			FILT_TIME=$(( FILT_END - FILT_START ))
+			LOOP_TIME=$(( FILT_END - LOOP_START ))
+			trace	"'$this_bot' whitelisted ..."
+			trace	"[$RULE]: $REPLY"
+			trace	"$STAGE Finished $BANDIT, [$RULESET/$RULE] $LOOP_TIME/$FILT_TIME ms"
+			continue
+		fi
+	
+	# Kick off noise ...
+	RULE=Superfluous
+		[[ "$REPLY" =~ ($SUPERFLUOUS) ]]
+		if [ -n "${BASH_REMATCH[0]}" ]
+		then	: echo "Superfluous stuff ... ignored ..."
+			continue
+		fi
+
+	RULE=Freehost
+		if [[ "$REPLY" =~ "@Freehost:" ]]
+		then
+			DEL_ADDR=`get_bandit`
+			: trace "$ME/$RULE Deleting $DEL_ADDR from $TABLE"
+			freehost $DEL_ADDR
+			continue
+		fi
+
+       	RULE=Self
+		if [[ "$REPLY" =~ "$THIS_IP" ]]
+		then    : trace "$ME/$RULE Oops ... me $THIS_IP"
+			continue
+		fi
+		
+       	RULE=DynIP
+		if [[ "$REPLY" =~ "$DYN_ADDR" ]]
+		then    : trace "$ME/$RULE Oops ... my dyn IP $DYN_ADDR"
+			continue
+		fi
+
+	# Careful here $TRUSTED is a list of IP addresses
+       	RULE=Trusted
+                if [[ "$REPLY" =~ ($TRUSTLIST) ]]
+                then    trace "$ME/$RULE Oops ... ${BASH_REMATCH[0]} in trusted hosts ... skipping"
+                        continue
+                fi
+
+	trace "Debuging: Debug: '$_DEBUG', Trace: '$_TRACE'"
+
+	#----------------- Reached filter stage -----------------
+
+	STAGE="[filter]"
+	dump_loadrate
+	trace  "[Loop: $LOOP] '$REPLY'"
+
+	# Determine the web instance (vhost) that was accessed
+	# This is needed BEFORE a call to 'filter' to choose the 
+	# right ruleset in 'filter' ...
+	#--------------------------------------------------------
+	# Instance configured in the http log template
+	# must match with the 'insttype' in DB
+	LOGINST=`get_insttype`
+
+	INSTANCE=`get_instance`
+	INSTANCE_ID=$($SQL "select id from instances where instname='$INSTANCE';" | tr -d '[:space:]')
+	[ -z "$INSTANCE_ID" ] && INSTANCE_ID=0
+
+	#INSTANCE_TYPE=`$SQL	"select insttype	from instances where id='$INSTANCE_ID';"`
+	INSTANCE_TYPE=$LOGINST
+
+	: trace "Instance/ID/Type: $INSTANCE; $INSTANCE_ID; $INSTANCE_TYPE; $LOGINST"
+	
+	FILT_START=`date +%s%3N`
+	filter $INSTANCE_TYPE		# Traverse filters with 'REPLY' (log line)
+	FILT_RESULT=$?
+	FILT_END=`date +%s%3N`
+
+	FILT_TIME=$(( FILT_END - FILT_START ))
+	LOOP_TIME=$(( FILT_END - LOOP_START ))
+
+	##############################################
+	# Post processor
+	##############################################
+	STAGE="[postpro]"
+	case $FILT_RESULT in 
+		0)	trace "[postpro] $RULE ... fall through, $LOOP_TIME/$FILT_TIME ms"
+		;;
+		1)	trace "[postpro] Finished for rule [$RULESET/$RULE] $LOOP_TIME/$FILT_TIME ms"
+			continue
+		;;
+		3)	trace "[postpro] $BANDIT white-listed ... nothing to do ..."
+			continue
+
+		#====== Return code 240...255 for internal use only ===============================
+		;;
+		241)	trace "[postpro] Debuging set '$Pattern'"
+			continue
+		;;
+		242)	trace "[postpro] Missing ruleset '$RULESET'"
+			continue
+		;;
+		254)	trace "[postpro] Ignored ... [$RULE] '$Pattern'"
+			continue
+		;;
+		255)	trace "[postpro] !!! Nasty things happend by rule '$RULE' !!!"
+		;;
+		*)	trace "[postpro] Illegal return code '$FILT_RESULT' in ruleset/rule $RULESET/$RULE ... fall through"
+	;;
+	esac
+
+	#-------------[ Catch all before loop finishes ]-----------
+	RULE=UNTREATED
+		log	"[$RULE] '$REPLY'"
+		trace	"[$RULE] '$REPLY'"
+done
+
+# DEAD-End ... Reaching here triggers a trap that restarts us 
+rerun

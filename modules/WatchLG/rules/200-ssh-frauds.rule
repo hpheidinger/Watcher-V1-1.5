@@ -1,0 +1,4 @@
+RULE="SSH-fatal-dispatch"
+Pattern=': ssh_dispatch_run_fatal:'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject; return $?; fi
