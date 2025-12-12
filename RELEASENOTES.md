@@ -29,6 +29,6 @@ geo-ar                                     9             508
 geo-br                                   493           33367
 geo-cn                                    57            3188
 ...
-``
+```
 
 Unusually high packet rates now get you a clue whether berserks are messing with access to your NIC.
