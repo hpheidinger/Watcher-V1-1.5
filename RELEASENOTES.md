@@ -10,6 +10,7 @@ Watcher 1.5 now blocks packets that are 'not_service_related' at 'raw/mangle; PR
 This strictly separates attacks on the NIC (e.g. flood-pings and illegal ports) from attacks on services and avoids that the counters in 'filter' are not pushed-up erratically an reflect the legal access to the services at the 'application layer (~OSI 5)
 
 (Watcher-Report -e; Efficiency-Report)
+```sh
 IPset comment                        Packets           Bytes
 ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 » filter/INPUT (~ OSI level: 5)
@@ -28,5 +29,6 @@ geo-ar                                     9             508
 geo-br                                   493           33367
 geo-cn                                    57            3188
 ...
+``
 
 Unusually high packet rates now get you a clue whether berserks are messing with access to your NIC.
