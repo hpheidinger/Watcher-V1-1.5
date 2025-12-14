@@ -7,13 +7,14 @@ ______________________
 - [Repository](https://watcher.comserve-it-services.de/repo/)
 
 ## Official Packages
-- [Production](https://watcher.comserve-it-services.de/repo/Watcher-1.4-Prod/)
-- [Nightly](https://watcher.comserve-it-services.de/repo/Watcher-1.4-nightly/)
+- [Production](https://watcher.comserve-it-services.de/repo/Watcher-1.5-Prod/)
+- [Nightly](https://watcher.comserve-it-services.de/repo/Watcher-1.5-nightly/)
 
 ## Official Documentation
+- [Release notes](https://watcher.comserve-it-services.de/repo/Docs/)
 - [Docs](https://watcher.comserve-it-services.de/repo/Docs/)
-- [Master Doc](https://watcher.comserve-it-services.de/repo/Docs/Watcher-Master-V1.4doc.pdf)
-- [Modules Doc](https://watcher.comserve-it-services.de/repo/Docs/Watcher-Modules-V1.4doc.pdf)
+- [Master Doc](https://watcher.comserve-it-services.de/repo/Docs/Watcher-Master-V1.5doc.pdf)
+- [Modules Doc](https://watcher.comserve-it-services.de/repo/Docs/Watcher-Modules-V1.5doc.pdf)
 
 
 ______________________
@@ -70,16 +71,19 @@ Watcher is **drop-anywhere software**. It is intentionally kept minimalistic:
 ```text
 [root@vmd123606 rules]# Watcher-Report -e | grep 'Summary' -A15
 ...
-_____ Summary ________________________________________
-          Total DROPed connections:   106631
-          Total passed connections:    31105
-        Total passthru connections:    28210
-         Total records in firewall:    36678
-                        Efficiency:    87.40% 
-                          .... min:    77.30% 
-                          .... max:    93.80% 
+***** Summary ************************************
+           Total DROPed connections:        118715
+           Total passed connections:          8923
+         Total passthru connections:         35416
+          Total records in firewall:         52963
 
-_____ Legend _________________________________________
+_____ Efficiency _________________________________
+                            Current:         93.00% 
+                            ... min:         93.00% 
+                            ... max:         94.60% 
+
+····· Legend ·····································
+
 	passthru 	- Count of 'white bots'
 	TD/TP 		~ Total dropped/passed 
 	Efficiency	= TD / (TD+TP)
