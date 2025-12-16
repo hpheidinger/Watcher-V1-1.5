@@ -60,12 +60,12 @@ Watcher doesn’t wait for threats — it reads them, classifies them, and acts 
 
 Watcher is **drop-anywhere software**. It is intentionally kept minimalistic:
 Make a choice for your installation path:
-/opt, /usr/local, /root/bin, ... whatever ...
+/opt, /usr/local, /root/bin, ... or whatever you like
 Then go to this installaion path and unpack Watcher.
 
 ```sh
 # cd <installation path>
-# tar xf Watcher.tar
+# tar xf <path to your downloaded Watcher.tar>
 # cd Watcher
 # ./Prep
 ```
