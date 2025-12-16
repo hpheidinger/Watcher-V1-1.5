@@ -11,8 +11,8 @@ ______________________
 - [Nightly](https://watcher.comserve-it-services.de/repo/Watcher-1.5-nightly/)
 
 ## Official Documentation
-- [Release notes](https://watcher.comserve-it-services.de/repo/Docs/)
-- [Docs](https://watcher.comserve-it-services.de/repo/Docs/)
+- [Docs](https://watcher.comserve-it-services.de/repo/Docs/) (Overview)
+- [Release notes](https://watcher.comserve-it-services.de/repo/Docs/Release-Notes-1.5.pdf)
 - [Master Doc](https://watcher.comserve-it-services.de/repo/Docs/Watcher-Master-V1.5doc.pdf)
 - [Modules Doc](https://watcher.comserve-it-services.de/repo/Docs/Watcher-Modules-V1.5doc.pdf)
 
@@ -25,7 +25,7 @@ ______________________
 **Watcher is not a simple script.**
 Watcher is a **program system** and a **complex framework**.
 
-It is a modular, fully automated IDS/IPS framework designed to block potential attackers in real-time, at the firewall level, before your services even become aware of them.
+It is a modular and fully automated IDS/IPS framework designed to block potential attackers in real-time, at the firewall level, before your services even become aware of them.
 
 ## What It Does
 
@@ -45,7 +45,7 @@ Unlike traditional tools, Watcher operates with situational awareness:
     ⚡ Updates rulesets dynamically without service interruption
 
 It’s not just a filter. It’s a strategy engine. 
-Watcher doesn’t wait for threats—it reads them, classifies them, and acts before they escalate.
+Watcher doesn’t wait for threats — it reads them, classifies them, and acts before they escalate.
 
 
 ## Key Features
