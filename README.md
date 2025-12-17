@@ -3,6 +3,8 @@ The Watcher-V1 series is the rendition for xtables firewalls managed by 'iptable
 
 ______________________
 # Official Resources:
+To avoid redundancies, packages and PDF documentation is striktly kept in a repository on our own servers in a central place.
+
 ## Official Watcher repository
 - [Repository](https://watcher.comserve-it-services.de/repo/)
 
