@@ -1,8 +1,0 @@
-0000000000000000000000000000000000000000 5738a511ba7705e1de9e086e2d647cc3b06ff482 Heinz-Peter Heidinger <hph@comserve-it-services.de> 1751491326 +0200	commit (initial): Initial commit: Watcher 1.4Prod clean production state
-5738a511ba7705e1de9e086e2d647cc3b06ff482 5738a511ba7705e1de9e086e2d647cc3b06ff482 Heinz-Peter Heidinger <hph@comserve-it-services.de> 1751491457 +0200	Branch: renamed refs/heads/master to refs/heads/main
-5738a511ba7705e1de9e086e2d647cc3b06ff482 81d97a57d49bceb42064f29f572e7982a84609de Heinz-Peter Heidinger <hph@comserve-it-services.de> 1751608997 +0200	pull: Fast-forward
-81d97a57d49bceb42064f29f572e7982a84609de dc467b9af0d1ecabc888f653dbad36266caebe54 Heinz-Peter Heidinger <hph@comserve-it-services.de> 1751613192 +0200	commit: Update README.md with official repo, download & docs links
-dc467b9af0d1ecabc888f653dbad36266caebe54 dd40d01008a14f2cbfb26118e163286948b205a1 Heinz-Peter Heidinger <hph@comserve-it-services.de> 1751751215 +0200	pull: Fast-forward
-dd40d01008a14f2cbfb26118e163286948b205a1 078f1d4dbdf5d3f368346407772139dc74ad207f Heinz-Peter Heidinger <hph@comserve-it-services.de> 1751794201 +0200	pull: Fast-forward
-078f1d4dbdf5d3f368346407772139dc74ad207f b3466ec569a2f16d1e5db99ce84333e76756612b Heinz-Peter Heidinger <hph@comserve-it-services.de> 1751794673 +0200	commit: Included official docs
-b3466ec569a2f16d1e5db99ce84333e76756612b e21fa23f05dccbb3aaf1bc80251c5f2fb6f440a9 Heinz-Peter Heidinger <hph@comserve-it-services.de> 1752302263 +0200	pull: Fast-forward
