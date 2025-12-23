@@ -7,8 +7,8 @@ With the introduction of Geo-Blocking (dynloader 'geo') and Geo-Tracking (Pseudo
 This showed some flaws under certain circumstances where attackers unleashed requests to service ports that Watcher does not manage, or foreign protocols like ICMP in flood-pings, attacking the network adapter.
 Such packets fell through to the 'filter' table and erratically pushed the packet counters.
 
-Watcher 1.5 now blocks packets that are 'not_service_related' at 'raw/mangle; PREROUTING' stage which is ~OSI level 3; i.e., simply by their IP address without taking care of protocol and/or service port. This means illegal protocols and or service ports are strictly getting a DROP before reaching the 'filter' stage.
-This strictly separates attacks on the NIC (e.g. flood-pings and illegal ports) from attacks on services and avoids that the counters in 'filter' are not pushed-up erratically an reflect the legal access to the services at the 'application layer (~OSI 5)
+Watcher 1.5 now blocks packets that are 'not_service_related' at 'raw/mangle; PREROUTING' stage, which is ~OSI level 3; i.e., simply by their IP address without taking care of protocol and/or service port. This means illegal protocols and or service ports are strictly getting a DROP before reaching the 'filter' stage.
+This strictly separates attacks on the NIC (e.g. flood-pings and illegal ports) from attacks on services and avoids that the counters in 'filter' are not pushed-up erratically and reflect the legal access to the services at the 'application layer (~OSI 5)
 
 (Efficiency-Report; 'Watcher-Report -e')
 ```sh
@@ -86,7 +86,7 @@ _____ Efficiency _________________________________
 
 ····· Legend ·····································
 
-	passthru 	- Count of 'white bots'
+	passthru 	- Count of 'white bots.'
 	TD/TP 		~ Total dropped/passed 
 	Efficiency	= TD / (TD+TP)
 	
