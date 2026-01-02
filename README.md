@@ -22,7 +22,7 @@ ______________________
 ## ... Driving Attackers Mad
 
 **Watcher is not a simple script.**
-Watcher is a **program system** and a **complex framework**.
+Watcher is a **program system** and a **complex framework** to proteect Linux server at the service level.
 
 It is a modular, fully automated IDS/IPS framework designed to block potential attackers in real-time, at the firewall level, before your services even become aware of them.
 
@@ -60,27 +60,66 @@ Watcher doesn’t wait for threats—it reads them, classifies them, and acts be
 Watcher is **drop-anywhere software**. It is intentionally kept minimalistic:
 
 ```sh
-# tar xf Watcher.tar
+# tar xf <path to your downloaded Watcher.tar archive>
 # cd Watcher
 # ./Prep
 ```
 
 ## Watcher efficiency
+Excerpt from Watcher's Efficiency-Report ...
 
 ```text
-[root@vmd123606 rules]# Watcher-Report -e | grep 'Summary' -A15
-...
-_____ Summary ________________________________________
-          Total DROPed connections:   106631
-          Total passed connections:    31105
-        Total passthru connections:    28210
-         Total records in firewall:    36678
-                        Efficiency:    87.40% 
-                          .... min:    77.30% 
-                          .... max:    93.80% 
+[root@comserve-it-services bin]# Watcher-Report -e
+WatcherV1 1.5 - Watcher-Report3 on comserve-it-services.de
+Time stamp    : 2026-01-02 15:28:52
+Up since      : 2025-12-30 01:53:16
+Watcher uptime: 3 d, 13:35:36
 
-_____ Legend _________________________________________
+===== Connection attempts of DROPed bandits ====================================
+IPset comment                                           Packets           Bytes
+––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+–––– filter/INPUT (~ OSI level: 5) –––––––
+WatchLG-DB,Login,FAKEHOST                                   643           37384
+WatchLG-DB,Login,KICKOFF                                   1314           87539
+WatchLG-DB,Login,NXDOMAIN                                 16794         1005632
+WatchMX-DB,Mail,FAKEHOST                                    512           30548
+WatchMX-DB,Mail,NXDOMAIN                                   1255           69848
+WatchMX-DB,Mail,TRUEHOST                                   1279           74879
+... 
+–––– raw/PREROUTING (~ OSI level: 3) –––––––
+GeoTrack-DB,GeoTrack,RU                                       1              40
+blacklisted                                                1510           90600
+custody-low,GeoTrack,CN                                      43            3148
+custody-low,GeoTrack,RU                                     108            6888
+custody-low,GeoTrack,ZA                                      87            5220
+geo-ae                                                      424           36622
+geo-ar                                                      633           36666
+geo-br                                                   105771         5763995
+geo-by                                                       40            2112
+geo-cn                                                     8383         1006173
+...
+spamhaus,drop                                             16291          704915
+
+                          Total DROPed connections:      252269        15104772
+––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+
+***** Summary *************************************************
+                          Total DROPed connections:      252269
+                          Total passed connections:       11245
+                        Total passthru connections:       70252
+                         Total records in firewall:       56309
+
+_____ Efficiency ______________________________________________
+                                           Current:       95.70% 
+                                           ... min:       89.90% 
+                                           ... max:      100.00% 
+
+····· Legend ··················································
+
 	passthru 	- Count of 'white bots'
 	TD/TP 		~ Total dropped/passed 
 	Efficiency	= TD / (TD+TP)
+	
+[report_efficiency] took 3085 ms
+
 ```
