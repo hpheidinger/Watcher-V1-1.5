@@ -11,7 +11,7 @@ ____________________
 
 ## Official Documentation
 - [Docs](https://watcher.comserve-it-services.de/repo/Docs/)
-- [Release notes 1.5](https://watcher.comserve-it-services.de/repo/Docs/Release-Notes-1.5.pdf
+- [Release notes 1.5](https://watcher.comserve-it-services.de/repo/Docs/Release-Notes-1.5.pdf)
 - [Master Doc](https://watcher.comserve-it-services.de/repo/Docs/Watcher-Master-V1.5doc.pdf)
 - [Modules Doc](https://watcher.comserve-it-services.de/repo/Docs/Watcher-Modules-V1.5doc.pdf)
 
