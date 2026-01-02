@@ -1,0 +1,50 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+
+REALPATH=$(realpath "$0")
+WHERE=$(dirname "$REALPATH")
+ME=$(basename "$REALPATH")
+cd "$WHERE" || exit 1
+. ../system.conf
+. ../watchermap.conf
+. ../common.conf
+. ../common.bashlib
+. ../conf/private/$ME.conf
+
+trap cleanup 0 1 2 15
+cleanup() {
+	rm -f $POOL/potential_bots.txt $POOL/new_bot_names.txt; 
+}
+
+> "$NEWBOTS_OUT"
+
+# 1) Nur eindeutige Bot-Namen extrahieren
+grep -R '"[^"]*Bot[^"]*"' "$LOGBASE"/* \
+	| awk -F'"' '{print $6}' \
+	| grep -oE '\b[A-Za-z0-9_-]+Bot\b' \
+	| sort -u > $POOL/potential_bots.txt
+
+escape_regex() {
+	printf '%s' "$1" | sed 's/[.[\*^$()+?{}|]/\\&/g'
+}
+
+while read -r botname
+do
+	bot_escaped=$(escape_regex "$botname")
+
+	if ! grep -Eq "(^|[[:space:];/])${bot_escaped}([[:space:];/]|$)" "$WHITEBOT_MAP" &&
+	   ! grep -Eq "(^|[[:space:];/])${bot_escaped}([[:space:];/]|$)" "$BADBOT_MAP"
+	then
+		echo "$botname"
+	fi
+done < $POOL/potential_bots.txt > $POOL/new_bot_names.txt
+
+# 2) Für jeden neuen Bot den kompletten UA-String mitnehmen
+while read -r botname; do
+	grep -R "\"[^\"]*${botname}[^\"]*\"" "$LOGBASE"/* \
+		| awk -F'"' '{print $6}' \
+		| sort -u
+done < $POOL/new_bot_names.txt >> "$NEWBOTS_OUT"
+

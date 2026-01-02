@@ -1,0 +1,21 @@
+RULE="Mailbox-Breaker;POP"
+Pattern='Error:[pop3]'
+#-------------	
+if [[ "$REPLY" =~ "$Pattern" ]]; then passon; return 2; fi
+
+RULE="Mailbox-Breaker;IMAP"
+Pattern='Error:[imap]'
+#-------------	
+if [[ "$REPLY" =~ "$Pattern" ]]; then passon; return 2; fi
+
+RULE="SASL-Plain-Break"
+Pattern='SASL PLAIN authentication failed'
+#--------------	
+if [[ "$REPLY" =~ "$Pattern" ]]; then passon; return 2; fi
+
+# Finally pass all 'SASL' stuff to WatchMB
+RULE="SASL-affair"
+Pattern=': SASL'
+#--------------	
+if [[ "$REPLY" =~ "$Pattern" ]]; then passon; return 2; fi
+

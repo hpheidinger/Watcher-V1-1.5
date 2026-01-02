@@ -1,0 +1,61 @@
+#
+# Trial baloons to inspect the system
+#
+WEB_CLASS=Trialbaloons
+###############################
+RULE=Double-Dash
+Pattern="GET //"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=BREAK-vendor
+Pattern="GET /vendor/"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=BREAK-webdav
+Pattern="GET /webdav/"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=BREAK-owa
+Pattern="GET /owa/"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+# PHP myadmin stuff in any shade and color
+RULE=PMA-1
+Pattern="GET /phpMyadmin"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=PMA-2
+Pattern="GET /phpmyadmin"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=PMA-3
+Pattern="GET /pma/"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=PMA-4
+Pattern="GET /PMA/"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=Agent
+Pattern="GET /agent/"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=Agent2
+Pattern="GET /agc/"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=Illegal_css
+Pattern="GET /css/"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+

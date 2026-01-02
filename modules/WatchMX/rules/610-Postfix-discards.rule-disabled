@@ -1,0 +1,5 @@
+RULE=Postfix-discard
+Pattern=': discard: header'
+#-------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 5; return $?; fi
+

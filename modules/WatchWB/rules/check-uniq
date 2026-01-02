@@ -1,0 +1,27 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+
+ACTIVE_RULES=`find . -name "*.rule";`
+
+grep -l -oE 'Pattern=' `echo $ACTIVE_RULES`
+
+Dups=$(for p in `echo $ACTIVE_RULES`
+do 	: echo $p
+	grep "Pattern=" $p| cut -f 2 -d"=" | tr -d "\""
+done | sort | uniq -d)
+
+echo "Duplicate patterns ..."
+echo "'$Dups'"
+
+if [ ! -z "$Dups" ]
+then
+	echo "
+	Dups in ..."
+	while read d
+	do	echo "Duplicate pattern '$d' found in ..."
+		pathsearch . "$d"
+	done	<<< "$Dups"
+fi

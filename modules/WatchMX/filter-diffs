@@ -1,0 +1,17 @@
+*** filter	2025-12-30 01:53:16.938025908 +0100
+--- filter.old	2025-12-28 23:12:30.193857056 +0100
+***************
+*** 1,6 ****
+  filter() {
+  : FILTER_STATE=Initial
+! : FILTER_DATE=2025-12-30T01:53:16+01:00
+  local debugs="@nodebug|@notrace|@alloff|@debug|@debug2|@trace"
+  local debfun
+  
+--- 1,6 ----
+  filter() {
+  : FILTER_STATE=Initial
+! : FILTER_DATE=2025-12-28T23:12:30+01:00
+  local debugs="@nodebug|@notrace|@alloff|@debug|@debug2|@trace"
+  local debfun
+  

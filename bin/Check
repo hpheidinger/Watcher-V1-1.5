@@ -1,0 +1,134 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+############################################################
+# - Check -
+# Check FiFo functionalities
+# 
+############################################################
+#------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../system.conf
+. ../watchermap.conf
+. ../common.conf
+. ../common.bashlib
+#------------------------
+
+usage() {
+	echo "Usage:"
+	echo "$ME [-l|-p]" {module token}
+	printf "\t%-20s ... %s\n" "-p token" 	"Check module pipe"
+	printf "\t%-20s ... %s\n" "-l token"	"Check logger to module"
+	echo "Examples:"
+	echo "	# $ME -l mx"
+	echo "	# $ME -p lg"
+	echo
+	echo "Without an option prints this usage information"
+	echo "Without a parameter prints a list of possible choices"
+
+	if [ $0 != 'bash' ]; then exit; fi
+}
+
+check_pipe() {
+local funtag="[${FUNCNAME[0]}]"
+local	prefix suffix pipepath
+local	errors=0
+
+echo "Performing $funtag"
+
+	prefix=$LOG_DIR/.pipes
+	case $TOKEN in
+		LG|MB|MX|WB)	suffix="Watch$TOKEN"	;;
+		GEO)		suffix="GeoTrack"	;;	
+	esac
+
+	pipepath="$prefix/$suffix"
+
+	if [ -e $pipepath ]
+	then	echo "$pipepath exists"
+	else	echo "CAUTION: $pipepath does NOT exists"
+		((errors++))
+	fi	
+
+	if [ -p $pipepath ]
+	then	echo "Pipe path '$pipepath' is a FiFo (named pipe)"
+	else	echo "CAUTION:  '$pipepath' is NOT FiFo (named pipe)"
+		((errors++))
+	fi
+
+	ls -l $pipepath
+
+	if [ $errors -eq 0 ]
+	then echo "»» $ME/$funtag 1.2.3.4" > $pipepath
+	fi
+}
+
+
+check_logger() {
+local funtag="[${FUNCNAME[0]}]"
+local	facility
+echo "Performing $funtag"
+
+	case $TOKEN in
+		LG) facility=authpriv 	;;
+		MX) facility=mail 	;;
+		WB) facility=local2	;;
+	esac	
+
+	logger -p $facility.info "»»» $ME/$funtag 1.2.3.4 $facility"
+}
+
+choices_logger() {
+local choices="LG|MX|WB"
+	echo "Possible choices: $choices"
+}	
+
+choices_pipe() {
+local choices="LG|MX|MB|WB|GEO"
+	echo "Possible choices: $choices"
+}	
+
+# -------------------- Main -------------------------------
+echo "--- $ME is experimental ---"
+Base=`Masterpath`
+DYNBASE="$Base/dynload"
+MODBASE="$Base/modules"
+LOGBASE="$LOG_DIR"
+
+if [ $# -eq 0 ]; then usage; fi
+# Careful -- we are sourced for the 'cd' to work
+# so clean some stuff from previous runs
+unset OPTIND OPTERR OPTARG
+unset opts
+while getopts :l:p: opts
+do
+	case $opts in
+		l)	TOKEN=${OPTARG^^} ;: echo $TOKEN
+			CMD=check_logger
+		;;
+		p)	TOKEN=${OPTARG^^} ;: echo $TOKEN
+			CMD=check_pipe
+		;;
+		h)	usage
+		;;
+		':')	echo "»» Parameter missing for '-"$OPTARG"' ««"
+			case $OPTARG in
+				l)	choices_logger	;;
+				p)	choices_pipe	;;
+				*)	usage		;;
+			esac
+		;;
+		'?')	echo "»» Invalid option ««"; usage; break;
+	;;
+	esac
+done
+
+# if [ $OPTIND -eq 1 ]; then usage; exit; fi
+# shift $((OPTIND-1))
+
+$CMD $TOKEN

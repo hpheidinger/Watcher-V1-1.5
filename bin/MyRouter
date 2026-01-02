@@ -1,0 +1,60 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+# Watcher-Tool
+# - MyRouter -
+#
+# Determine current IP address of a WLAN router
+# by its dynDNS FQDN
+#-------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../system.conf
+. ../watchermap.conf
+. ../common.conf
+. ../common.bashlib
+#-------------------------
+
+OPTIND=1 
+VERBOSE=0
+while getopts v flag
+do
+	case "$flag" in
+		v) VERBOSE=1
+	;;
+	esac
+done
+shift "$((OPTIND-1))"
+
+initial=0
+if [ -f $LOG_DIR/DYN_IP ]
+then read OLD_IP < $LOG_DIR/DYN_IP
+else (( initial++ ))
+fi
+
+THIS_IP=`dig +short $DYN_ADDRESS`
+THIS_HOST=`dig +short -x $THIS_IP`
+
+Stamp="`date --iso=seconds`"
+
+if [ $initial -gt 0 ]
+then
+	ipset -q -exist add myrouters $THIS_IP comment "$ME,initial,$Stamp"
+	echo $THIS_IP > $LOG_DIR/DYN_IP
+else		
+	if [[ "$OLD_IP" =~ "$THIS_IP" ]]
+	then	ipset -q -exist add myrouters $THIS_IP comment "$ME,refreshed,$Stamp"
+	else 
+		echo $THIS_IP	> $LOG_DIR/DYN_IP
+		echo $THIS_HOST	> $LOG_DIR/DYN_POOLADDR
+		ipset -q -exist add myrouters $THIS_IP comment "$ME,changed,$Stamp"
+		ipset -q -exist del myrouters $OLD_IP
+		logger "$ME, Dyn IP address changed from '$OLD_IP' to '$THIS_IP'"
+	fi
+fi
+
+if [ $VERBOSE -ne 0 ]; then echo "$THIS_IP"; fi

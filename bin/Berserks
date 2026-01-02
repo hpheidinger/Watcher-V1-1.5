@@ -1,0 +1,90 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;   _DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT; _DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then           _TRACE=$1; shift; fi
+####################################################################
+# - Berserks, Master -
+# Get berserks from iptables; i.e. IPs with extreme packet counts
+# Call frequently by CRON
+####################################################################
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+
+. ../system.conf
+. ../watchermap.conf
+. ../common.conf
+. ../common.bashlib
+
+#--------- API stuff --------
+. ../api/bash/$ME.bashlib
+
+#--------- Private stuff ----
+. ../conf/private/$ME.conf
+
+#========================
+# Local functions
+#========================
+
+# Create blackout and loadfile from iptables/ipset
+mk-blackout() {
+	local table="$1"
+	local target_ipset="$2"
+	local hook_chain="PREROUTING"
+
+	iptables -t "$table" -vxnL | grep 'match-set' | \
+	awk -v me="$ME" \
+		-v pool="$POOL" \
+		-v loadfile="$LOADFILE" \
+		-v limit="$PACKET_LIMIT" \
+		-v targetset="$TARGET_IPSET" \
+		'
+			@include "words.awklib"
+			BEGIN {
+				tmpfile = pool "/" me ".tmp"
+				print "TMP-File:", tmpfile
+			}
+			{
+				# Packet counter
+				packets = $1
+				if (packets < limit) next
+
+				# Pick word after "match-set"
+				ipset = word_after("match-set", $0)
+
+				print packets, ipset > tmpfile
+			}
+		'
+
+	# Make the xdp loadfile from IPs in IPSET exceeding the limit
+	ipset list "$target_ipset" | grep '^[1-9]' | grep -v 'packets 0' | sort -V -k3,3 | \
+	awk -v limit="$PACKET_LIMIT" \
+		-v me="$ME" \
+		-v pool="$POOL" \
+		-v loadfile="$LOADFILE" \
+		'
+			{
+				if ($3 > limit) {
+					print $1 > loadfile
+				}
+			}
+		'
+}
+
+_usage() {
+	echo "Usage: $ME <ipset name>"
+	exit 1
+}
+
+#========================
+# Main
+#========================
+[ -z "$1" ] && _usage
+TARGET_IPSET="$1"
+
+prepare
+
+mk-blackout raw "$TARGET_IPSET"
+mk_bpf_map  # From API-library
+

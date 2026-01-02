@@ -1,0 +1,10 @@
+WEB_CLASS=_ignore_
+###############################
+# - Special rule -
+# return '0' (~ok) to pass tracing
+
+RULE=Fall-Through
+Pattern=' 200 '
+#---------------	
+if [[ "$REPLY" =~ "$Pattern" ]]; then return 0; fi
+

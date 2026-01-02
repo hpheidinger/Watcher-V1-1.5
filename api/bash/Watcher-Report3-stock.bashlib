@@ -1,0 +1,414 @@
+#
+# Private BASHlib for Watcher-Report3 - Stock report
+# - main processing -
+. Watcher-Report3-stock-helper.bashlib
+
+declare -A grands=([records]=0 [cidrs]=0 [plain]=0 [nodes]=0 [label]='')
+declare -A whites=([records]=0 [cidrs]=0 [plain]=0 [nodes]=0 [label]='')
+
+_LABELW=34
+OUTFORM="%-34s : %8d %8d %8d %'15d\n"
+TOTFORM="%34s » %8d %8d %8d %'15d\n"
+DETFORM="%34s . %8d %8d %8d %'15d\n"
+COLFORM="%34s | %8s %8s %8s %15s\n"
+
+###
+### Main processing
+###
+
+#
+# Conditionally dump details for an IPset
+#
+dump_details() {
+# $1	the IPset's name
+local funtag="[${FUNCNAME[0]}]"
+
+	[ -n "$_TRACE" ] && echo $funtag
+	: echo "»» IPset $1 ««"
+	case $1 in
+		WatchLG*)	details_LG "$1" ;;
+		WatchMX*)	details_MX "$1" ;;
+		WatchWB*)	details_WB "$1" ;;
+		*)		echo "IPset $1 is not known"
+	;;
+	esac
+}
+
+#
+# Common for detail output ...
+#
+process_details() {
+local	all="$1"
+local	num num_cidrs num_plain num_nodes
+local	detail
+local	details="$2"
+local	set="$3"
+declare -A det
+
+	sec_headline "$4" "$5"
+	colheaders
+	for detail in $details
+	do
+		num=$(grep "$detail" <<< "$all" | wc -l)
+		num_cidrs=$(grep "$detail" <<< "$all" | grep -c  "/")
+		num_plain=$(grep "$detail" <<< "$all" | grep -vc "/")
+
+		num_nodes=0
+		if [ $num_cidrs -gt 0 ]
+		then num_nodes=$(calc_subips "$set")
+		fi
+
+		det[records]=$num
+		det[cidrs]=$num_cidrs
+		det[plain]=$num_plain
+		det[nodes]=$num_nodes
+		det[label]=$detail
+		det[set]=$set
+		detail_out det
+	done
+}
+
+
+#
+# IPset details for the login module LG
+#
+details_LG() {
+# $1	the set name
+local funtag="[${FUNCNAME[0]}]"
+local	module_txt='Login'
+local	details="NXDOMAIN FAKEHOST TRUEHOST"
+local	all=`grep "DB,$module_txt," <<< "$ALL"`
+
+	process_details "$all" "$details" "$1" "$module_txt" "-"
+}
+
+# Details MX
+# Views 'Mail' and 'Mailbox' details
+#
+details_MX() {
+# $1	The set name	
+local funtag="[${FUNCNAME[0]}]"
+local	all module_txt
+local	details="NXDOMAIN FAKEHOST TRUEHOST"
+
+	: echo $funtag
+
+	# Phase #1 - Mail MTA
+	module_txt='Mail'
+	all=`grep "DB,$module_txt," <<< $ALL`
+	process_details "$all" "$details" "$1" "$module_txt" "-"
+
+	# Phase #2 - Mailbox POP/IMAP
+	module_txt='Mailbox'
+	all=`grep "DB,$module_txt," <<< $ALL`
+	process_details "$all" "$details" "$1" "$module_txt" "-"
+}
+
+# Details WB
+# The WEB module has arbitrary classes defined
+# by 'WEB_CLASS=...' in the *.rule files
+#
+details_WB() {
+# $1	The set name	
+local funtag="[${FUNCNAME[0]}]"
+local	module_txt='WEB'
+local	all
+local	details
+#declare -A det
+
+	: echo $funtag
+
+	details=`get_wb_details`
+	all=`grep ",$module_txt" <<< $ALL`
+	process_details "$all" "$details" "$1" "$module_txt" "-"
+}
+
+get_wb_details() {
+local funtag="[${FUNCNAME[0]}]"
+local	all
+local	section="DB,WEB,"
+local	details
+
+	all=`ipset l | grep "$section"`
+	awk '
+		{
+			split($0,parts,",")
+			detail=parts[3]
+			gsub("\"","",detail)
+			details[detail]=detail
+		}
+	END	{
+		for (detail in details) {
+			print detail
+		}
+	}
+	' <<< $all | sort
+}
+
+#
+# Switch some ugly row labels
+#
+pretty() {
+# $1	A row label
+local	pretty
+
+	case $1 in
+		NXDOMAIN) pretty="NX Domains" ;;
+		FAKEHOST) pretty="Fake hosts" ;;
+		TRUEHOST) pretty="True hosts" ;;
+		*)	  pretty="$1"
+	esac
+
+	echo "$pretty"
+}
+
+detail_out() {
+# $1	Map of detail values
+local funtag="[${FUNCNAME[0]}]"
+local	-n map=$1
+#local	row_label="${map[set]},${map[label]}"
+local	row_label=`pretty "${map[label]}"`
+
+	[ -n "$_TRACE" ] && echo $funtag
+	# echo ${map[*]}	# DEBUG
+	printf "$DETFORM" "$row_label" ${map[records]} ${map[cidrs]} ${map[plain]} ${map[nodes]}
+}
+
+
+#
+# Dump a single set
+#
+dump_set() {
+# $1	set name
+# $2	row label
+# $3	map for totals cumulation
+local funtag="[${FUNCNAME[0]}]"
+local	-n map=$3
+local	set=$1
+local	row_label="$2"
+local	all num num_cidrs num_plain num_nodes
+local	detail_sets="WatchLG-DB WatchMX-DB WatchWB-DB"
+
+	all=`$IPSET list $set | grep '^[1-9]'`
+
+	case $set in
+		Watch*) dump_details $set
+	;;
+	esac
+
+ 	num=`wc -l <<< $all`
+	num_cidrs=`grep -cE   '^.*/[0-9]{1,2}\ ' <<< $all`
+	num_plain=`grep -cvE  '^.*/[0-9]{1,2}\ ' <<< $all`
+
+	if [ $num_cidrs -gt 0 ]
+	then num_nodes=`calc_subips $set`
+	else num_nodes=0
+	fi
+
+	(( map[records]  += num ))
+	(( map[cidrs]    += num_cidrs ))
+	(( map[plain]    += num_plain ))
+	(( map[nodes]    += num_nodes ))
+
+	# Add to the grand-totals (global) as well ..
+	# ... except for the whitelist which is not of type DROP 
+	# - but ACCEPT
+	if [ "$set" != 'whitelist' ]
+	then	
+		(( grands[records]  += num ))
+		(( grands[cidrs]    += num_cidrs ))
+		(( grands[plain]    += num_plain ))
+		(( grands[nodes]    += num_nodes ))
+	else
+		(( whites[records]  += num ))
+		(( whites[cidrs]    += num_cidrs ))
+		(( whites[plain]    += num_plain ))
+		(( whites[nodes]    += num_nodes ))
+	fi
+
+	lineout "$row_label" $num $num_cidrs $num_plain $num_nodes
+}
+
+#
+# Dump out a bunch of sets
+#
+dump_sets() {
+# $1	List of sets
+# $2	Row prefix
+# $3	Passed label for totals
+# $4	Section headings
+local funtag="[${FUNCNAME[0]}]"
+local   set sets="$1"
+local   row_label tot_label
+local	section section_headers="$4" section_texts
+declare -A tot=([records]=0 [cidrs]=0 [plain]=0 [nodes]=0 [label]='')
+
+	: echo "$funtag"
+
+	if [ -z "$3" ]
+	then tot[label]="Tot label empty, $funtag"
+	else tot[label]="$3"
+	fi
+
+	for set in `echo $sets`
+	do
+		row_label="$2 '$set'"
+		dump_set $set "$row_label" tot
+	done
+
+	tot_out tot
+}
+
+report_ipsets() {
+local funtag="[${FUNCNAME[0]}]"
+local	row_label="Internal IPset"
+local	tot_label="Totals internal IPsets"
+#local	sets=`$IPSET l -n`
+#local	sets='custody'
+local	sets=$INTERNAL_SETS	# from the conf file
+
+	headline "Internal IPSETs" _
+	colheaders
+	dump_sets "$sets" "$row_label" "$tot_label"
+}
+
+report_module_dbs() {
+local funtag="[${FUNCNAME[0]}]"
+local	modules="LG MX WB"
+local	row_label="DROPs in module DB"
+local	tot_label="Total of module DBs"
+local	set sets db 
+local	sections="DB,Login DB,Mail DB,Mailbox DB,WEB"
+
+	headline "Module databases" _
+	# colheaders
+
+	sets=`printf "Watch%s-DB " $modules | xargs`
+	dump_sets "$sets" "$row_label" "$tot_label" "$sections"
+}
+
+report_dynloader() {
+local funtag="[${FUNCNAME[0]}]"
+local	sets="spamhaus"		# should be in the conf file
+local	row_label="DROPS contrib. by"
+local	tot_label="Total DROPS from dynloaders"
+
+	headline "Dynloader" _
+	colheaders
+	dump_sets "$sets" "$row_label" "$tot_label"
+}
+
+report_geo_tracker() { # the pseudo module's DB
+local funtag="[${FUNCNAME[0]}]"
+local	modules="GeoTrack"
+local	row_label="Pseudo module DB"
+local	tot_label="Total DROPs in GeoTrack"
+local	set sets db 
+
+	headline "Geo Tracker" _
+	colheaders
+	sets=`printf "%s-DB " $modules`
+	dump_sets "$sets" "$row_label" "$tot_label"
+}
+
+report_geo_blocker() { # stuff from ipdeny
+local funtag="[${FUNCNAME[0]}]"
+local	row_label="DROPs contrib. by ipdeny"
+local	tot_label="Total geo blockings"
+local	sets
+
+	CMD=`grep ZONES $MASTER_PATH/dynload/geo/geo.conf `
+	eval $CMD
+
+	headline "Geo blockings" _
+	echo "($CMD)"
+	colheaders
+
+	sets=`printf "geo-%s " $ZONES | xargs`
+	dump_sets "$sets" "$row_label" "$tot_label"
+}
+
+report_black() {
+local funtag="[${FUNCNAME[0]}]"
+local	sets="blacklist" 
+local	row_label="DROPs in"
+local	tot_label="Blacklist totals"
+
+	headline "Blacklist (manually maintained in $MASTER_PATH)" _
+	colheaders
+	dump_sets "$sets" "$row_label" "$tot_label"
+}
+
+report_white() {
+local funtag="[${FUNCNAME[0]}]"
+local	sets="whitelist" 
+local	row_label="ACCEPTS in"
+local	tot_label="Whitelist totals"
+
+	headline "Whitelist (manually maintained in $MASTER_PATH)" _
+	colheaders
+	dump_sets "$sets" "$row_label" "$tot_label"
+}
+
+report_passthru() {
+local funtag="[${FUNCNAME[0]}]"
+local	sets="passthru" 
+local	row_label="ACCEPTS in"
+local	tot_label="Passthru totals"
+
+	headline "Passthru - 'white bots'" _
+	colheaders
+	dump_sets "$sets" "$row_label" "$tot_label"
+}
+
+
+report_summary() {
+local funtag="[${FUNCNAME[0]}]"
+	
+	echo
+	sepline "*"
+	headline "Grand totals" "*"
+	sepline "*"
+	report_black
+
+	headline "Total firewall" =
+	colheaders
+
+	grands[label]="Total records in firewall" 
+	tot_out grands
+
+	# Whitelist can't be counted as DROPs
+	# Since it is target 'ACCEPT'
+	report_white
+	report_passthru
+}
+
+
+#
+# Do a full report
+#
+report_stock() {
+local funtag="[${FUNCNAME[0]}]"
+local	rep_start=$(date +%s%3N) 
+local	rep_end rep_time rep_time_s
+
+ALL=$( ipset l | grep '^[1-9]*')	
+sepline =
+echo
+echo "$ME of $HOSTNAME, $SYSTEM $SYSVERS
+Timestamp: `date --iso` `date +%T`"
+sepline =
+report_ipsets
+report_dynloader
+report_module_dbs
+report_geo_tracker # the Pseudo-Module
+report_geo_blocker # stuff from ipdeny
+report_summary
+
+rep_end=$(date +%s%3N)
+rep_time=$(( rep_end - rep_start ))
+
+headline "[ $ME finished in $rep_time ms ]" =
+}	
+
+# vim: set filetype=sh noexpandtab tabstop=8 shiftwidth=8 autoindent smartindent :

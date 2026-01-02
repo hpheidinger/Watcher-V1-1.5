@@ -1,0 +1,47 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+##############################################
+# - Whitelist, Master -
+# Run this manually after changes 
+# or hourly from crontab with a short cycle
+# e.g. every 5 minutes
+##############################################
+#------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../system.conf
+. ../common.conf
+. ../common.bashlib
+#------------------------
+
+if [ -f $MASTER_PATH/whitelist ]
+then
+	WHITE=`awk '
+	BEGIN {}
+	/^$/		{ next }	# Blank lines ignored
+	/^[ \t]*[#]+/	{ next }	# Comment lines ignored	
+			{ IPS[$1]=$1 }
+	END { for (ip in IPS) { print ip } }
+	' $MASTER_PATH/whitelist`
+
+	logger	"$ME[$$] White listing firewall ..."
+
+	if ! ipset -q list whitelist >/dev/null 2>&1
+	then ipset -exist create whitelist hash:net
+	fi
+
+	ipset flush whitelist
+	for w in `echo $WHITE`
+	do ipset -exist add whitelist $w comment whitelisted
+	done
+
+	logger	 "$ME[$$] Loaded whitelist from whitelist file ..."
+else
+	logger	 "$ME[$$] No whitelist file ..."
+	echo	 "$ME: No whitelist file ..."
+fi

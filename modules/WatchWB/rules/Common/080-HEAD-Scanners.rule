@@ -1,0 +1,9 @@
+WEB_CLASS=HEADscan
+###############################
+
+# Illegal Method HEAD
+RULE=HEAD-Scanner
+Pattern="HEAD /"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 3; return $?; fi
+

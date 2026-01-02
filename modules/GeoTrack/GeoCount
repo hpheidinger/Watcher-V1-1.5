@@ -1,0 +1,60 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+# - GeoCount - Executable file
+#
+# Count attacks by country and service
+#
+#-------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../../system.conf
+. ../../watchermap.conf
+. ../../common.conf
+. ../../common.bashlib
+. GeoTrack.conf
+#-------------------------
+
+#----------------- Main -----------------------
+: echo "Where    : $WHERE"
+: echo "FiFo base: $FIFO_BASE"
+: echo "Pipe     : $PIPE"
+: echo "DB       : $DB"
+: echo "Table    : $TABLE"
+
+# Make a compare string from $ZONES for 'grep -E ...' 
+COUNTRIES=`awk '{print toupper($0)}' <<< $ZONES | tr ' ' '|'`
+
+PROC_START=`date +%s%3N`
+
+if [ -z "$1" ]
+then	trace "No country code ... quitting ..."
+	exit
+else	COUNTRY=$1
+	shift
+fi
+
+TABLE=`awk '{print tolower($0)}' <<< $ME`
+: echo "Table: $TABLE"
+
+haveit=`$SQL "select country from $TABLE where country='$COUNTRY'";`
+
+if [ -z "$haveit" ]
+then
+	$SQL "insert into $TABLE (country, count, lasttime) 
+		values ('$COUNTRY',1,
+			datetime(current_timestamp,'localtime')
+		);"
+else
+	$SQL "update $TABLE set count=count+1 
+		where country='$COUNTRY'
+		;"
+fi
+
+PROC_END=`date +%s%3N`
+PROC_TIM=$(( PROC_END - PROC_START ))
+trace "$COUNTRY, Processing time: $PROC_TIM""ms"

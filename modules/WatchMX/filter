@@ -1,0 +1,199 @@
+filter() {
+: FILTER_STATE=Initial
+: FILTER_DATE=2025-12-30T01:53:16+01:00
+local debugs="@nodebug|@notrace|@alloff|@debug|@debug2|@trace"
+local debfun
+
+RULE=SetDebug
+
+if [[ "$REPLY" =~ ($debugs) ]]
+then
+    debfun=${BASH_REMATCH[1]}	# Extract found matches
+    trace "$funtag Debuging $debfun wanted"
+    setdebug "$debfun"
+    Pattern="$debfun"		# Let the post processor know the choice ...
+    return 241   
+fi
+# ------------- End: debug settings ----------------------------------------
+# - 001-Ignore.rule -
+# Special ruleset to suppress UNTREATED logs
+# i.e. it does NOT call 'inject' and simply 
+# returns exit code 254 to the post processor
+#
+# Alternative to an entry in the module's superfluous_map file
+RULE="Ignore-SSH-DH-mismatch" 
+Pattern=': invalid public DH value:'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then return 254; fi
+
+RULE="Received_by" 
+Pattern=' Received: by '
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then return 254; fi
+
+RULE="Received_from" 
+Pattern=' Received: from '
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then return 254; fi
+
+RULE="MSG_ID" 
+Pattern=': message-id=<'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then return 254; fi
+
+RULE="Legal_transfer" 
+Pattern=': client='
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then return 254; fi
+
+#
+# 001-Kickoff.rule
+#
+# Kick off known badfingers immediately
+# Calls 'kickoff' instead 'inject'
+#
+RULE=Stretchoid-junk
+Pattern='.stretchoid.com['
+#-------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=Ninja-Mailtester
+Pattern='.mailtester.ninja['
+#-------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+#
+# 005-HELO-Fakes.rule
+#
+# Kick off culprits that fake HELO
+# Calls 'kickoff' instead 'inject'
+#
+RULE=HELO-Fake
+Pattern=': Helo command rejected: Host not found;'
+#-------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+# - 010-Scanner.rule
+# Special ruleset to catch scanners
+# i.e. it does call 'inject' with 5 (= $MAX_AFFAIRS) 
+# The next occurence triggers a shoot-down
+#
+# Alternative to an entry in the module's superfluous_map file
+RULE="Shodan-Scanner"
+Pattern='.shodan.io['
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 5; return $?; fi
+
+RULE="Censys-Scanner"
+Pattern='.censys-scanner.com['
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 5; return $?; fi
+
+RULE="Cyberresilience-Scanner"
+Pattern='.cyberresilience.io['
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 5; return $?; fi
+
+RULE="BinaryEdge-Scanner"
+Pattern='.binaryedge.ninja['
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 5; return $?; fi
+
+# - 099-External-block
+# Special ruleset to suppress UNTREATED logs
+# i.e. it does NOT call 'inject' and simply 
+# returns exit code 4 (externaly blocked) to
+# the post-processor
+RULE="ZEN-spamhaus-block"
+Pattern='blocked using zen.spamhaus.org;'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then return 4; fi
+
+RULE="Barracuda-block"
+Pattern='blocked using b.barracudacentral.org;'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then return 4; fi
+
+
+
+
+#
+# - 100-NXDOMAINS.rule -
+# NX domains have not business to do on an MTA
+#
+RULE="NXdomain"
+Pattern=': connect from unknown['
+#---------
+if [[ "$REPLY" =~ "$Pattern" ]]; then CLASS=NXDOMAIN; kickoff; return $?; fi
+
+RULE="NXdomain_after"
+Pattern='after CONNECT from unknown['
+#---------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject; return $?; fi
+
+RULE="NXdomain-TLS"
+Pattern='Anonymous TLS connection established from unknown['
+#---------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 5; return $?; fi
+
+RULE=NX-SSL
+Pattern=': SSL_accept error from unknown['
+#-------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject; return $?; fi
+
+RULE=FakeHost
+Pattern='does not resolve to address'
+#--------------	
+#if [[ "$REPLY" =~ "$Pattern" ]]; then CLASS=FAKEHOST; inject 5; return $?; fi
+if [[ "$REPLY" =~ "$Pattern" ]]; then CLASS=FAKEHOST; kickoff; return $?; fi
+
+RULE=Host
+Pattern=': connect from'
+#--------------	
+if [[ "$REPLY" =~ "$Pattern" ]]; then CLASS=TRUEHOST; inspect; return $?; fi
+
+RULE=SMTPS
+Pattern='SSL_accept error from '
+#-------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject; return $?; fi
+
+RULE="Mailbox-Breaker;POP"
+Pattern='Error:[pop3]'
+#-------------	
+if [[ "$REPLY" =~ "$Pattern" ]]; then passon; return 2; fi
+
+RULE="Mailbox-Breaker;IMAP"
+Pattern='Error:[imap]'
+#-------------	
+if [[ "$REPLY" =~ "$Pattern" ]]; then passon; return 2; fi
+
+RULE="SASL-Plain-Break"
+Pattern='SASL PLAIN authentication failed'
+#--------------	
+if [[ "$REPLY" =~ "$Pattern" ]]; then passon; return 2; fi
+
+# Finally pass all 'SASL' stuff to WatchMB
+RULE="SASL-affair"
+Pattern=': SASL'
+#--------------	
+if [[ "$REPLY" =~ "$Pattern" ]]; then passon; return 2; fi
+
+RULE=Non_SMTP_CMD
+Pattern=': warning: non-SMTP command'
+#-------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=Postfix-warning
+Pattern=': warning: '
+#-------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject; return $?; fi
+
+# Attempt of pushing to illegal mailbox
+RULE='NOQUEUE'
+Pattern=': NOQUEUE: reject:'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject; return $?; fi
+
+RULE=NO_RULE_MATCH
+return 0
+}

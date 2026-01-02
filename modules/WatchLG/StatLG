@@ -1,0 +1,65 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+# - StatLG -
+#------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../../system.conf
+. ../../common.conf
+. ../../common.bashlib
+#------------------------
+. WatchLG.conf
+
+STAMP=`date +%Y%m%d-%H.%M`
+
+$SQL -header -csv "
+	select date(date_event) as "Datum", 
+		(SELECT COUNT(state) FROM $TABLE
+			WHERE state='INTRO' and date(date_event) = date(a.date_event) 
+			  and date(date_event) != current_date )	as "Introduction",
+		(SELECT COUNT(state) FROM $TABLE
+			WHERE state='COUNT' and date(date_event) = date(a.date_event)
+			  and date(date_event) != current_date )	as "Counted",
+		(SELECT COUNT(state) FROM $TABLE
+			WHERE state='DROP'  and date(date_event) = date(a.date_event)
+			  and date(date_event) != current_date )	as "Dropped"
+	from $TABLE a 
+		where date(date_event) != current_date 
+	group by "Datum"
+	order by "Datum"
+	;
+	" > Statistics-LG.csv
+
+$SQL -header -csv "
+	select date(date_event) as "Datum", 
+		(SELECT COUNT(class) FROM $TABLE
+			WHERE class='NXDOMAIN' and date(date_event) = date(a.date_event) 
+			  and date(date_event) != current_date )	as "NXdomains",
+		(SELECT COUNT(class) FROM $TABLE
+			WHERE class='FAKEHOST' and date(date_event) = date(a.date_event)
+			  and date(date_event) != current_date )	as "Fake_hosts",
+		(SELECT COUNT(class) FROM $TABLE
+			WHERE class='TRUEHOST'  and date(date_event) = date(a.date_event)
+			  and date(date_event) != current_date )	as "True_hosts"
+	from $TABLE a 
+		where date(date_event) != current_date 
+	group by "Datum"
+	order by "Datum"
+	;
+
+" > Statistics-LG_by_class.csv
+
+mail -s Statistics-LG-$STAMP	\
+-a Statistics-LG.csv 		\
+-a Statistics-LG_by_class.csv	\
+$REPORTMAIL <<EOF
+Your statistics report for '$ME' as of '$STAMP' in CSV format.
+See attachments.
+.
+EOF
+

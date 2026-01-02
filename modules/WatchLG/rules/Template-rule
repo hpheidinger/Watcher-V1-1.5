@@ -1,0 +1,36 @@
+# - Template rule -
+# Remove this heading for production
+#
+# Beginning with revision 1.3 Watcher rules are evaluated by
+# a the BASH match operator '=~` instad of using external 
+# like 'awk' and/of 'grep'. This is significantly faster.
+# 'Pattern' can be a simple string or a REGEX
+# This is determined by the formulation of the decision line 
+#   'if [[ "$REPLY" =~ "$Pattern" ]]; ...' ... does a string match
+#   'if [[ "$REPLY" =~  $Pattern  ]]; ...' ... does a REGEX  match
+# Note the missing double-quotes around '$Patern' for a REGEX interpretation.
+# For easy of use the 'decision block' is a 'one-liner' since Watcher 1.3
+# which is sufficient for most cases.But it can be a real 'code block'as well.
+#
+# Take into account, that the leading numbers (3 digits) of the rule file
+# provide a means to give rules an order and priority, since often the order 
+# counts.  Have _more_specific_ rules BEFORE _more_common_rules_; 
+# e.g.:
+#
+#	Pattern='Anonymous TLS connection established from unknown['
+#	Pattern='connection established from unknown['
+#	Pattern='connect from unknown['
+#
+# Give your rule file a '.rule' extension to set it into production
+#
+# Use 'check-rule' & 'check-all-rules' in the rules directory on new or changed
+# rule files before the Watcher service is restarted.
+#
+# For copy'n'paste ...
+#  ---------------- snip, snip ----------------------------
+RULE="A unique rule name here"
+Pattern='... A pattern to match the log line ...'
+#--------- Decision -----------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject; return $?; fi
+#  ---------------- snip, snip ----------------------------
+

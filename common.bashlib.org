@@ -1,0 +1,370 @@
+#===========================================================
+#=======	... Do NOT change anything below ...	====
+#===========================================================
+# Function library for all dynloaders, modules & programs
+#===========================================================
+#
+#	Common procedures 
+#	shared by all programs, dynloaders & modules
+#
+# log simple
+log() {
+        printf "%-18s %-s[%d]: %s\n" "`date +%Y-%m-%dT%T.%3N`" "$ME" "$$" "$*" >> $LOG
+}
+
+#
+# Columized log 
+# 4 columns: 10,10,15,rest
+#
+clog() {
+        printf "%-18s %-s[%d]: %-10s %-10s %-15s %s\n" "`date +%Y-%m-%dT%T.%3N`" "$ME" "$$" "$1" "$2" "$3" "$4" >> $LOG
+}
+
+# Pass to GeoTrack pseudo-module
+do_geotrack() {
+local   funtag="[${FUNCNAME[0]}]"
+local	callfunc=$3
+
+	if [ -p $FIFO_BASE/GeoTrack ]
+	then echo $BANDIT $ME $callfunc >> $FIFO_BASE/GeoTrack
+	fi
+}
+
+trace() {
+	if [ ! -z "$TRACE" ]
+	then echo "`date +%Y-%m-%dT%T.%3N` $ME[$$]: $*" >> $ME.trace
+	fi
+}
+
+# Check whether forward and reverse DNS resolution resolves to
+# the same IP address
+get_class() {
+# $1 ..	an IP address
+local thisIP
+local thisHOST
+
+        thisHOST=`dig +short -x $1`
+        if [ -z "$thisHOST" ]; then echo NXDOMAIN; return; fi
+
+        thisIP=`dig +short $thisHOST`
+	if [[ "`echo $thisIP`" =~ "$1" ]]
+        then    echo TRUEHOST
+        else    echo FAKEHOST
+        fi
+}
+
+validate_IP() {
+	if [[ "$SYSSTYLE" =~ "rhel" ]]
+	then	/bin/ipcalc -sc $1; return $?
+	else	# Debian-ish do it the hard way ...
+		$IPSET -q -exist add validate $1; return $?
+	fi
+}
+
+
+# Pick the bandit's IP from the log line
+# Probably enquoted by ticks (single quotes), parens,
+# brackets or curly braces or even at the beginnig or
+# end of the line e.g. for PostFix
+#
+# Common/universal ...
+# Enclose the 'REPLY' in spaces helps matching
+# not to fail with IP adresses at begining or end
+# of the log line
+get_bandit() {
+	awk '
+	BEGIN { rc=1 
+		# Devel. note: See /root/bin/Test/IPmatch
+		IP4PAT="([1-9]{1}[0-9]{0,2}[.]{1}){1}((0{1}[.])|([1-9]{1}[0-9]{0,2}[.])){2}((0{1})|([1-9]{1}[0-9]{0,2})){1}([\\] ]|[\\} ]|[\\) ]|[\\047 ]|[\\042 ]|[ ])+"
+	}
+	match($0,IP4PAT) {
+				trail=substr($0,RSTART,RLENGTH)
+				gsub(/[\[\]\{\}\(\)\047\042 ]/,"",trail)
+				print trail
+				rc=0
+	}
+	END { exit rc }
+	' <<< " $REPLY "
+}
+
+
+#
+# Whitelist check
+#
+whitelist() {
+:
+}
+
+#
+# Remove IP addr from database and ipsets
+#
+freehost() {
+local   funtag="[${FUNCNAME[0]}]"
+local   haveit
+
+        haveit=`$SQL "select IP from $TABLE where IP='$1';"`
+        if [ ! -z "$haveit" ]
+        then    $SQL "delete from $TABLE where IP='$1';"
+
+        	# Cleanup in firewall
+        	$IPSET -exist del $ME-DB $1
+        	$IPSET -exist del custody $1
+        	$IPSET -exist del tarpit $1
+                log	"$funtag Removing $1 from $ME database $DB"
+                trace	"$funtag Removing $1 from $ME database $DB"
+        fi
+}
+
+#
+# Create an ipset with DROP target
+mk-ipset() {
+# $1 ..	the ipset to be created
+local   funtag="[${FUNCNAME[0]}]"
+local	setname=$1
+local	settype=$2
+
+	case $FIREWALL in
+		iptables)
+			$IPSET -exist create $*
+
+			if $IPTABLES -t filter -C INPUT   -m set --match-set $setname src -j DROP >/dev/null 2>&1
+			then : echo "$setname already linked with xtables"
+			else $IPTABLES -t filter -I INPUT   -m set --match-set $setname src -j DROP >/dev/null 2>&1
+			fi
+
+			if $IPTABLES -t filter -C FORWARD -m set --match-set $setname src -j DROP >/dev/null 2>&1
+			then : echo "$setname already linked with xtables"
+			else $IPTABLES -t filter -I FORWARD -m set --match-set $setname src -j DROP >/dev/null 2>&1
+			fi
+		;;
+		firewalld)	# DON'T USE !!!!
+			firewall-cmd --permanent --new-ipset=$setname --type="$settype"
+			firewall-cmd --permanent --zone=public --add-source=ipset:$setname
+			firewall-cmd --reload
+		;;
+		*)	logger	"[$ME:$$] Error - firewall unknown ..."
+			trace	"Error - firewall unknown ..."
+	;;
+	esac
+}
+
+# Make a grep -E 'string|string|..." list from superfluous_map file
+mk_superfluous() {
+local funtag="[${FUNCNAME[0]}]"
+	awk '
+	BEGIN   { str="" }
+	/^[ \t]*($|#)/	{ next }
+        	        { str=str $0 "|" }
+	END {	gsub(/[|]$/,"",str)
+		print str
+	}
+	' < rules/superfluous_map
+	trace "$funtag (Re)building superfluous_map"
+}
+
+compress_filter() {
+local funtag="[${FUNCNAME[0]}]"
+	if [ -f filter ]
+	then
+		awk '
+		/^[ \t]*($|#)/	{ next }
+				{ print }
+		' filter > filter.compress
+	fi
+}
+
+dump_loadrate() {
+local funtag="[${FUNCNAME[0]}]"
+local	loop_rate loop_secs loop_mils loop_days loop_rest 
+local	hum_rate
+
+       # Need one loop ahead to calculate a difference
+        if [ ! -z "$FILT_END" ]
+        then
+                # Loop rate in ms ...
+                loop_rate=$(( `date +%s%3N` - FILT_END ))
+                loop_secs=$(( loop_rate/1000 ))
+                loop_mils=`printf "%03d" $((loop_rate%1000))`
+                loop_days=$(( loop_secs/86400 ))
+                loop_rest=$(( loop_secs%86400 ))
+                hum_rate="`date -u -d @$loop_rest +%T`.$loop_mils"
+                trace   "« Loop rate: $loop_days d, $hum_rate »"
+        fi
+}
+
+dump_runtime() {
+local funtag="[${FUNCNAME[0]}]"
+local	rtfile=RUNTIME
+local	oform="%-15s: %-s\n"
+local	rdstat
+
+	rdstat=`mount | grep '^Watcher' | awk '{ print $1,"on",$3}'`
+
+	> $rtfile
+	printf 	"$oform" "Object:"	$ME		>> $rtfile
+	printf 	"$oform" "MasterPath:"	$MASTER_PATH	>> $rtfile
+	printf 	"$oform" "Pool:"	$POOL		>> $rtfile
+	printf 	"$oform" "RAMdisk:"	"$rdstat"	>> $rtfile
+	printf 	"$oform" "Path:"	$PATH		>> $rtfile
+	printf 	"$oform" "Toolslink:"	$TOOLS_LINK	>> $rtfile
+	printf 	"$oform" "AWKpath:"	$AWKPATH	>> $rtfile
+	printf 	"$oform" "BASHlib:"	$BASHLIB	>> $rtfile
+	printf 	"$oform" "\$IPSET:"	$IPSET		>> $rtfile
+	printf 	"$oform" "ipset:"	`which ipset`	>> $rtfile
+	printf 	"$oform" "AWK:"		`which awk`	>> $rtfile
+	printf 	"$oform" "date:"	`which date`	>> $rtfile
+	printf 	"$oform" "grep:"	`which grep`	>> $rtfile
+	printf 	"$oform" "sqlite:"	`which sqlite3`	>> $rtfile
+	printf 	"$oform" "logger:"	`which logger`	>> $rtfile
+}
+
+# Create a table with the module's configuration data
+# $1	The database name from module
+config_table() {
+local funtag="[${FUNCNAME[0]}]"
+local	table=`cut -f1 -d"." <<< "$1"`
+
+	$SQL "drop table if exists config;"
+	$SQL "CREATE TABLE config (
+		key	TEXT PRIMARY KEY,
+		value	TEXT
+	);"
+
+	# Insert configuration data into config table
+	$SQL "INSERT INTO config (key, value) VALUES
+		('my_path',	'$WHERE'),
+		('my_db',	'$DB'),
+		('max_affairs', '$MAX_AFFAIRS');"
+
+	### Define the triggers to drop entries exceeding max_affairs
+	
+	# Define the trigger for INSERT
+	$SQL	"DROP TRIGGER IF EXISTS drop_on_insert;"
+	$SQL	"CREATE TRIGGER drop_on_insert
+			AFTER INSERT ON $table
+			FOR EACH ROW
+			WHEN	NEW.affairs >= CAST((SELECT value FROM config 
+			WHERE	key = 'max_affairs') AS INTEGER)
+			BEGIN
+				UPDATE $table SET
+					state	= 'DROP'
+				WHERE	IP	= NEW.IP;
+			END;"
+
+	# Define the trigger for UPDATE
+	$SQL	"DROP TRIGGER IF EXISTS drop_on_update;"
+	$SQL	"CREATE TRIGGER drop_on_update
+			AFTER UPDATE ON $table
+			FOR EACH ROW
+			WHEN	NEW.affairs >= CAST((SELECT value FROM config 
+			WHERE	key = 'max_affairs') AS INTEGER)
+			BEGIN
+				UPDATE $table SET
+					state	= 'DROP'
+				WHERE	IP	= NEW.IP;
+			END;"
+}
+
+#
+# Provide watcher counters chain to iptables
+#
+mk_watchercounters() {
+local funtag="[${FUNCNAME[0]}]"
+local	name=WATCHCNT
+local	haveit
+local	ports_login="22"
+local	ports_mta="25 465 587"
+local	ports_mbox="110 143 993 995"
+local	ports_web="80 443"
+local	ports_other=""
+local	port_group_name
+local	port_list
+local	added_ports
+
+	# Check if the watcher counter chain already exists
+	haveit=$(iptables -nL INPUT | grep -w $name)
+
+	if [ -z "$haveit" ]
+	then
+		echo "$funtag Creating $name chain..."
+		iptables -N $name
+
+		# Traverse port groups and add rules
+		for port_group in "login:$ports_login" "mta:$ports_mta" "mbox:$ports_mbox" "web:$ports_web" "other:$ports_other"
+		do
+			port_group_name=${port_group%%:*}
+			port_list=${port_group#*:}
+			added_ports=""
+
+			for port in $port_list
+			do
+				iptables -A $name -p tcp -m state --state NEW --dport "$port" -j RETURN
+ 				added_ports+="$port "
+			done
+
+			if [ -n "$added_ports" ]
+			then
+                		#echo "$funtag Added counter(s) for $port_group_name on port(s): $added_ports"
+                		printf "%s Added counter(s) for %5s on port(s): %s\n" $funtag $port_group_name "$added_ports"
+			fi
+		done
+
+		# Link watcher counters into INPUT chain
+		echo "$funtag Linking $name to INPUT chain..."
+		iptables -I INPUT 1 -j $name
+	else
+ 		echo "$funtag $name chain already exists. Skipping creation."
+    	fi
+}
+
+
+# Check SQL requests for success
+check_sql() {
+# $1	return code of call
+# $2	error message (if any)
+local funtag="[${FUNCNAME[0]}]"
+local	retcode=$1
+local	error="$2"
+local	msg=''
+
+	if [ $retcode -ne 0 ]
+	then 	msg="$funtag SQL Error: $retcode"
+		if [ -n "$error" ]; then msg="$msg, '$error'"; fi
+	fi
+
+	# Dump a trace entry
+	if [ -n "$msg"   ]; then trace "$msg"; fi
+}
+
+# Pick SQL result from a map
+check_sql_map() {
+local funtag="[${FUNCNAME[0]}]"
+local -n map=$1
+local	msg
+
+	if [ ${map[rc]} -ne 0 ]
+	then 	msg="$funtag SQL Error: ${map[rc]}"
+		if [ -n "${map[result]}" ]; then msg="$msg, '${map[result]}'"; fi
+	fi
+
+	# Dump a trace entry
+	if [ -n "$msg" ]; then trace "$msg"; fi
+}
+
+pickDB-new() {
+local funtag="[${FUNCNAME[0]}]"
+local keep=3	# Number of backups to keep
+local timestamp=$(date --iso=seconds)
+
+	trace "$ME:$funtag Picking new database: $DB from $DB-new"
+
+	# Rotate backups
+	[ -e "$DB" ] && mv "$DB" "$DB-$timestamp"
+
+	# Remove old backups, keep only latest $keep
+	ls -t "$DB"-* 2>/dev/null | tail -n +$(($keep + 1)) | xargs rm -f 2>/dev/null
+
+	# Activate new DB
+	mv "$DB-new" "$DB"
+}
+

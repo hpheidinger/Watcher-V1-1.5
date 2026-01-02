@@ -1,0 +1,72 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+PROC_START=`date +%s%N`
+#------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../../system.conf
+. ../../common.conf
+. ../../common.bashlib
+#------------------------
+. WatchWB.conf
+
+trap cleanup    0 1 2 9 15
+
+cleanup() {
+        PROC_END=`date +%s%N`
+        PROC_TIME=`echo "scale=3; ($PROC_END - $PROC_START)/10^6" | bc`
+        logger "$ME[$$]: Finished: $PROC_TIME ms'"
+        printf  " » %-15s ... finished in %8.2f ms\n" $ME $PROC_TIME
+}
+
+
+
+LOADER=WB
+LOADFILE=$POOL/ipset.Loadfile-$LOADER
+
+log "$ME started loading from $DB ..."
+
+#
+# Read the database and fill the load file 
+#
+### Remove trash at first ...
+$SQL "delete from $TABLE where IP='' or IP='unknown';"
+
+>$LOADFILE
+BANDITS=`$SQL "select IP,type,web_class from $TABLE where state='DROP' order by IP;"`
+
+echo "$BANDITS" |\
+awk -v loadfile=$LOADFILE -v setname=$MYSET -v settyp="$SETTYP" -v setopts="$SETOPTS" '
+BEGIN   {}  
+        {
+                split ($0,parts,"|")
+                bandits[parts[1]]=parts[2]","parts[3]
+        }
+END     {
+	printf "-exist create %s %s %s\n", setname, settyp, setopts > loadfile
+
+        for (bandit in bandits) {
+                CLASS=bandits[bandit]
+#		COMMENT="DB,"CLASS
+		COMMENT=setname","CLASS
+		if ( bandit != "" )
+			printf "add %s %s comment \"%s\"\n", setname, bandit, COMMENT >> loadfile
+	}
+}
+'
+
+have_it=`ipset -n list | grep $MYSET`
+
+if [ -z "$have_it" ]
+then mk-ipset $MYSET "$SETTYP" "$SETOPTS"
+fi      
+
+$IPSET flush $MYSET
+$IPSET -file $LOADFILE restore 
+
+log "$ME finished loading ..."

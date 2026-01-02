@@ -1,0 +1,12 @@
+allips=$(sqlite3 webhogs.db "
+SELECT ip
+FROM webhogs 
+WHERE ip LIKE '47.128.%';" | sort -V
+) 
+
+min_ip=$( head -1 <<< "$allips" )
+max_ip=$( tail -1 <<< "$allips" )
+
+echo "$min_ip, $max_ip"
+CIDR $min_ip $max_ip
+

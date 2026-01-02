@@ -1,0 +1,60 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+# - MXinjector -
+# Inject a manual immediate DROP into mail DB & firewall ...
+#
+#-------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../../system.conf
+. ../../common.conf
+. ../../common.bashlib
+#-------------------------
+. ./WatchMX.conf
+
+DBInject() {
+local	comment="$2"
+
+	CLASS=`get_class "$1"`
+
+	$SQL "insert into $TABLE (affairs,origin,state,IP,class,type,severity,date_intro,date_event,comment)
+              values ('99','Manual','DROP','$1','$CLASS','$THIS_TYPE','BLACKOUT',
+			datetime(current_timestamp,'localtime'),
+			datetime(current_timestamp,'localtime'),
+			'$comment');"
+}
+
+IntoFW() {
+local comment
+
+        # See if that beast is already dropped
+        #
+        if $IPSET -q test $MYSET $1
+        then return
+        fi
+
+        # OK - have an addr not yet dropped
+        #
+        comment="Manual inject,$2"
+        DBInject "$1" "$comment"
+        $IPSET add custody $1 comment "custody,$comment"
+}
+
+# ----------------- main ---------------------
+if [ -z "$1" ]
+then
+	echo "Usage: $ME IP_addr comment_tag"
+else
+	validate_IP $1
+	if [ $? -ne 0 ]
+	then 	echo "Illegal IP address '$1' ... exiting"
+		exit
+	fi
+	
+	IntoFW "$1" "$2"
+fi

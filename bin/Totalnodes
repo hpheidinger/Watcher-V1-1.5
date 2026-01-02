@@ -1,0 +1,57 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+####################################################
+# - Totalnodes -
+# Calculate nodes in a CIDR from an IPSET
+# 
+####################################################
+#------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../system.conf
+. ../watchermap.conf
+. ../common.conf
+. ../common.bashlib
+#------------------------
+
+
+if [ -z "$1" ]
+then 	echo "Must specify an ipset ... exiting"
+	echo `ipset -n l`
+ 	echo "... exiting"
+	exit
+fi
+
+ALL_CIDRS=`ipset list $1 | grep '^[1-9]'`
+
+awk '
+BEGIN {	
+	total=0
+	cidrs=0
+}
+	{
+	#	print
+	#	print $1
+		x=split ($1,parts,"/")
+		net=parts[1]
+		msk=parts[2]
+	
+		if (x > 1) { 
+			cidrs++ 
+			size=2^(32-msk)
+			total += size
+		} else {
+			if (x == 1) total++
+		}	
+	#	print net,msk,size
+	}
+END	{
+		printf "Total nodes: %\047d; %d CIDRs\n",total,cidrs
+}
+
+' <<< "$ALL_CIDRS"

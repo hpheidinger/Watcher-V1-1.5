@@ -1,0 +1,292 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+#
+# Prepare Watcher V1.x for operation
+#
+# WHERE=`realpath .` ... nice pitfall ...
+# cd $WHERE
+WHERE=`pwd`
+MASTER_PATH=$WHERE
+ME=`basename $0`
+#-----------------
+export WATCHER_MODE=prep	# Allow sourcing 'watcher.conf'
+. watcher.conf
+
+echo "Watcher master preparation - Watcher $PRODUCT $REVISION"
+echo "Your installation is in $MASTER_PATH ..."
+echo "$MASTER_PATH" > MASTER_PATH
+
+echo "This machine: $HOSTNAME"
+echo "IP address  : `hostname -i`"
+
+
+#
+# See which system we are running on and which firewall is installed and running
+#
+check_system() {
+local	system=`grep '^ID=' /etc/os-release  | tr -d "\"" | cut -f2 -d"="`
+local	version=`grep '^VERSION_ID=' /etc/os-release | tr -d "\"" | cut -f2 -d"="`
+local	syslike=`grep '^ID_LIKE=' /etc/os-release | tr -d "\"" | cut -f2 -d"="`
+local	sysstyle="$system $syslike"
+	
+	FIREWALL=''	# Assume no firewall
+	>system.conf	# ... and clear system.conf file
+	echo "# This file was written by the 'Prep' routine" 	>> system.conf
+	echo "# -- Do not change manually ---"	 		>> system.conf
+	echo "MASTER_PATH='$MASTER_PATH'"	>> system.conf
+	echo "POOL='$MASTER_PATH/Pool'"		>> system.conf
+	echo "SYSTEM='$system'"		 	>> system.conf
+	echo "SYSVERS='$version'"	 	>> system.conf
+	echo "SYSSTYLE='$system $syslike'"	>> system.conf
+	echo "SYSLIKE='$syslike'"	 	>> system.conf
+
+	printf "System: %s %s\n" $system $version
+	printf " style: %s %s\n" "$sysstyle"
+	printf "  like: %s %s\n" "$syslike"
+
+	is_fwd_up=`ps -ef| grep -v grep | grep -o 'firewalld' | uniq`
+	if [ ! -z "$is_fwd_up" ]
+	then
+		echo "FIREWALL='$FIREWALL'" >> system.conf
+		echo "The 'firewalld' was found on this system being installed and active"
+		echo "Watcher Rev. 1.x is based on the kernels 'xtables' firewall."
+		echo "'xtables' is maintained by the native 'iptables' & 'ipset' commands"
+		echo "Disable 'firewalld' first of all."
+		echo "	# systemctl disable firewalld"
+		echo "	# systemctl stop    firewalld"
+		echo "Then install the package:"
+		echo " iptables-services	... on RHEL & clones or Fedora"
+		echo " netfilter-persistent	... on Debian and offsprings (Ubuntu,MINT, ...)"
+		echo " iptables-services	... in SuSE SLES or opensuse Leap - see docs"
+		echo "Finally enable the firewall loader service for your specific system:"
+		echo "	# systemctl enable iptables		(RHEL & clones, Fedora)"
+		echo "	# systemctl enable netfilter-persistent	(Debian and offsprings (Ubuntu, MINT, ...)"
+		echo "	# systemctl enable iptables		(SuSE SLES and opensuse Leap - see docs)"
+		exit
+	fi
+
+	# If this is not a firewalld-system check for legacy 'iptables.service'
+	# (CentOS-7 until 2024 $ RHEL-8 clones until 2029)
+	case $system in
+		almalinux|ol|rocky|\
+		rhel|centos|fedora)	IPTABLES_SERVICE=iptables
+		;;
+		debian|ubuntu)		IPTABLES_SERVICE=netfilter-persistent
+		;;
+		*suse*)			IPTABLES_SERVICE=iptables
+	;;
+	esac
+
+	if [ -f /usr/lib/systemd/system/$IPTABLES_SERVICE\.service ]
+	then
+		systemctl status $IPTABLES_SERVICE | grep -v grep | grep -o 'Active: active (exited)'
+		if [ $? -eq 0 ]
+		then
+			echo "Legacy 'iptables' firewall found on this system being installed and active."
+			FIREWALL=iptables
+			echo "FIREWALL='$FIREWALL'"			>> system.conf
+			echo "IPTABLES_SERVICE='$IPTABLES_SERVICE'"	>> system.conf
+		fi
+	fi
+
+	#
+	# Supply pointer to iptables (V4) basic setup
+	#
+	case $system in
+		almalinux|ol|rocky|\
+		centos|rhel|fedora)	BASE_IPTABLES="/etc/sysconfig/iptables"
+		;;
+		debian|ubuntu)		BASE_IPTABLES="/etc/iptables/rules.v4"
+		;;
+		*suse*)			BASE_IPTABLES="/etc/sysconfig/iptables"	# see docs
+		;;
+		*)			echo "Unsupported system '$system'"
+					echo "Contact Watcher support"
+					exit
+	;;
+	esac
+
+	echo "BASE_IPTABLES='$BASE_IPTABLES'"	>> system.conf
+}
+
+
+#
+# See if needed tools on the system 
+#
+check_tools() {
+local musthave="bash awk grep"
+local tools="$musthave realpath iptables ipset ipcalc dig wget at bc whois sqlite3"
+local m t 
+
+	#
+	# Check for the absolute basics
+	# --- just with shell internals! ---
+	#
+	echo "--------------------------------------------------------"
+	for m in `echo $musthave`
+	do
+		result=`$m --version | head -1 | grep GNU`
+		if [ $? -ne 0 ]
+		then
+			echo "$m is missing on your system - watcher does not work without"
+			echo "Please install $m"
+			echo "Exiting ..."
+			exit
+		else
+			echo "$result"
+		fi	
+	done
+	echo "--------------------------------------------------------"
+	
+	# Assume everything is missing
+	missing=0
+	missed=""
+	for t in `echo $tools`
+	do
+		if ! which $t >/dev/null 2>&1
+		then
+			printf "%8s %12s %s\n" "Missing" $t "-- please install it for proper operation"
+			missed=$missed" $t"
+			(( missing++ ))
+		else
+			HAVEIT=`which $t`
+			printf  "%8s %12s as %s\n" "Found" $t $HAVEIT
+		fi
+	done
+}
+
+check_system
+echo "export MASTER_PATH POOL SYSTEM SYSVERS SYSLIKE SYSSTYLE"	 >> system.conf
+echo "export FIREWALL IPTABLES_SERVICE BASE_IPTABLES"		 >> system.conf
+export MASTER_PATH POOL SYSTEM SYSVERS SYSLIKE SYSSTYLE
+export FIREWALL IPTABLES_SERVICE BASE_IPTABLES
+
+if [ -z "$FIREWALL" ]
+then
+	echo "No active firewall system was found on this machine"
+	echo "There must be an activated firewall system present to have Watcher"
+	echo "working properly"
+	echo
+	echo "Activate the firewall loader service $IPTABLES_SERVICE"
+	echo "	# systemctl enable $IPTABLES_SERVICE"
+	echo "	# systemctl start  $IPTABLES_SERVICE"
+	echo "Then start ./'$ME' again in $MASTER_PATH"
+	read -p "Press ENTER" DUMMY
+	exit
+fi
+
+check_tools
+
+if [ $missing -ne 0 ]
+then 
+	echo "Not found: $missed"
+	echo "---------------------------------------------------------------------"
+	echo "There are important tools missing on your system"
+	echo "Install these tools and run '`basename $0`' again in $MASTER_PATH"
+	echo "until all needed programs are found as being installed" 
+	echo "Exiting ..."
+	read -p "Press ENTER" DUMMY
+	exit
+else
+	echo "---------------------------------------------------------------------"
+	echo "Nothing is missing"
+fi
+
+#
+# Place a SysV-style init script in /etc/inid.d/...
+#
+
+#
+# Scan for a reasonablee init.d
+# ... or create one when missing at all
+#
+if [ -d /etc/init.d ]
+then INITD_OK=1	: echo "All fine /etc/init.d directory exists"
+elif 	[ -l /etc/init.d ]
+	then INITD_OK=1 : echo "All fine /etc/init.d exists as symlink"
+else INITD_OK=0
+	haveit=`find /etc -name "init.d"`
+	
+	if [ -z "$haveit" ]
+	then mkdir /etc/init.d
+	else ln -s $haveit /etc/init.d
+	fi
+fi
+
+INITNAME=watcher
+if [ ! -f /etc/init.d/$INITNAME ]
+then
+	echo "Preparing in /etc/init.d/..."
+	ln -s $WHERE/Watcher.init /etc/init.d/$INITNAME
+
+	if [ "$SYSTEM" == "rhel" ] || [[ "$SYSTEM" =~ "$SYSLIKE" ]]
+	then
+		(cd /etc/init.d && chkconfig --add $INITNAME)
+	fi
+fi
+
+#
+# Have a systemctl-style startup system?
+#
+if [ -d /usr/lib/systemd/system ]
+then
+	if [ ! -f /usr/lib/systemd/system/$INITNAME.service ]
+	then
+		ln -sf $WHERE/watcher.service  /usr/lib/systemd/system/$INITNAME.service 
+		systemctl daemon-reload
+		systemctl enable $INITNAME.service
+		echo "Provided systemctl service $INITNAME.service"
+		echo "Enabled systemctl service $INITNAME.service"
+	fi
+else
+	echo "Not a 'systemd'-style system ..."
+fi
+
+#
+# Provide the common load pool directory
+# ... probably on a RAM disk ...
+#
+if [ ! -d $POOL ]
+then
+	mkdir $POOL
+	chmod 750 $POOL	
+	echo "Established pool directory '$POOL'"
+fi
+
+if [ ! -f whitelist ]
+then
+	awk -v thishost=`dig +short $HOSTNAME` '
+	/^(aaa.bbb.ccc.ddd)/ 	{ printf "%s\t\t# This host ...\n", thishost; next }
+				{ print }
+	' whitelist-sample > whitelist
+fi
+
+if [ ! -f blacklist ]
+then
+	cp blacklist-sample blacklist
+fi
+
+# Traverse regular modules and run ./Prep in the 
+# module path
+PREPS="WatchLG WatchMX WatchWB GeoTrack"
+
+for p in $PREPS
+do
+	(cd $MASTER_PATH/modules/$p && ./Prep)
+done
+
+echo "
+Ok. '$INITNAME' is prepared for operation. You can fire it up with:
+   'systemctl start $INITNAME'	 ... or ...
+   'service $INITNAME start'	 ... or ...
+   '/etc/init.d/$INITNAME start'
+Other options are 'stop', 'restart' and 'reload'
+
+- Check your 'watcher.conf' main configuration file in '$MASTER_PATH'
+- Check your 'loader.conf'  in the Watcher master path '$MASTER_PATH'.
+- Check your 'common.conf'  in the Watcher master path '$MASTER_PATH'.
+- Check your individual <MODULE>.conf configuration(s) in the module paths.
+"

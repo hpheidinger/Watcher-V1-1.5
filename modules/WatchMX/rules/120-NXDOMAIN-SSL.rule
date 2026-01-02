@@ -1,0 +1,5 @@
+RULE=NX-SSL
+Pattern=': SSL_accept error from unknown['
+#-------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject; return $?; fi
+

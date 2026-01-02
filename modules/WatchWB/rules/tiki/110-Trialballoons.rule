@@ -1,0 +1,8 @@
+WEB_CLASS="Trialballoon"
+#######################
+
+RULE=Illegal-Trial
+Pattern='GET /wp-login.php'
+#--------- Decision -----------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject; return $?; fi
+

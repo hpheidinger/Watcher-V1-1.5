@@ -1,0 +1,18 @@
+# - 099-External-block
+# Special ruleset to suppress UNTREATED logs
+# i.e. it does NOT call 'inject' and simply 
+# returns exit code 4 (externaly blocked) to
+# the post-processor
+RULE="ZEN-spamhaus-block"
+Pattern='blocked using zen.spamhaus.org;'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then return 4; fi
+
+RULE="Barracuda-block"
+Pattern='blocked using b.barracudacentral.org;'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then return 4; fi
+
+
+
+

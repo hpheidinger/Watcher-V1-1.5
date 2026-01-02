@@ -1,0 +1,56 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+# - Rules -
+# No exit from this program, since it might be sourced!
+# Variables are prefixed with '__' and unset on termination
+
+__choices() {
+	echo "Possible choices: $__CHOICES (any case)"
+}
+
+__BASE=`Masterpath`
+__MODPATH=$__BASE/modules
+__RULEDIRS=`(cd $__MODPATH; find . -type d -name "rules")`
+
+__CHOICES=`awk '{ 
+			gsub(/.\/Watch/,"");
+			gsub(/\/rules/,"");
+		       	str[$0] = $0
+		}
+	END {
+		#for (s in str) { printf ("%s "), s }
+		n=asort(str,outarr)
+		for ( i=1; i<=n; i++ ) {
+			outstr=outstr sprintf("%s,", outarr[i])
+		}
+		gsub (/,$/,"",outstr)
+		print outstr
+	}
+	' <<< "$__RULEDIRS"`
+
+if [ -z "$1" ]
+then	__choices
+else
+	__SUFFIX=${1^^}
+	case $__SUFFIX in
+		LG|MB|MX|WB)	__TARGET="Watch"$__SUFFIX/rules
+	;;
+	esac
+
+	# 'cd' works only when program is sourced!
+	# otherwise does nothing ...
+	if [ -d $__MODPATH/$__TARGET ]
+	then	echo "$__MODPATH/$__TARGET"
+		cd $__MODPATH/$__TARGET
+	else	echo "»» No such module path '$__MODPATH/$__TARGET'"
+		echo $RULEDIRS
+		__choices
+	fi
+fi
+
+unset		__BASE __MODPATH __SUFFIX __TARGET __CHOICES 
+unset -f	__choices
+

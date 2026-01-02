@@ -1,0 +1,24 @@
+# 000-Ignore.rule
+# Special ruleset to suppress UNTREATED logs
+# i.e. it does NOT call 'inject' and returns exit code 254
+#
+
+# Catch [UNTREATED] for a legal login
+RULE="LEGAL_LOGIN"
+Pattern=': Accepted password for'
+#--------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then return 240; fi
+
+# Fails with IP-Pattern in PTR address for some bandits
+RULE="BREAK-IN"
+Pattern='POSSIBLE BREAK-IN ATTEMPT'
+#--------------
+#if [[ "$REPLY" =~ "$Pattern" ]]; then return 254; fi
+# Give it a shot ...
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject; return $?; fi
+
+# No IP address in log-line ...
+RULE="Ignore-SSH-DH-mismatch" 
+Pattern=': invalid public DH value:'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then return 254; fi

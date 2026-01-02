@@ -1,0 +1,48 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+####################################################
+# - SQL Trace -
+# Switch to module path and view the SQL trace file
+####################################################
+#------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../system.conf
+. ../watchermap.conf
+. ../common.conf
+. ../common.bashlib
+#------------------------
+
+if [ -z "$1" ]
+then	echo "Specify which module to measure (LG,MX,MB,WB,Geo) ..."
+	exit
+fi
+
+MODNAME=${1^^}
+
+case $MODNAME in
+	LG|MX|MB|WB)	MOD_PATH=Watch$MODNAME
+	;;
+	GE*)		MOD_PATH=GeoTrack
+;;
+esac
+
+. ../modules/$MOD_PATH/$MOD_PATH.conf > /dev/null 2>&1
+if [ $? -ne 0 ]
+then	echo "Ooops. No module $1"
+	echo "Try one of LG, MB, MX, WB, Geo"
+	exit
+fi
+
+if [ -z "$SQL_TRACE" ]
+then 	echo "SQL tracing for $1 is off"
+	exit
+fi
+
+cd ../modules/$MOD_PATH
+exec tail -100f $MOD_PATH.sql_trace

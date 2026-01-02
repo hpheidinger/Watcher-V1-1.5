@@ -1,0 +1,10 @@
+RULE=Non_SMTP_CMD
+Pattern=': warning: non-SMTP command'
+#-------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=Postfix-warning
+Pattern=': warning: '
+#-------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject; return $?; fi
+

@@ -1,0 +1,266 @@
+calc_cidr() { 
+local result
+local netaddr=$1
+local brdcast=$2
+
+	awk -v the_net=$netaddr -v the_bcast=$brdcast ' 
+	@include "netlib.awk"
+	BEGIN { print cidr(the_net,the_bcast) }
+	'
+}
+
+## old - don't use ###########
+calc_cidr_bash () {
+# Needed for APNIC Whois records that do not provide 
+# a 'route:' entry or a CIDR otherwise
+# $1	... an IP address
+local funtag="[${FUNCNAME[0]}]"
+local	answer i
+local	n nbit netaddr
+local	b bbit brdcast
+local	mask
+
+	answer=`grep -E '^inetnum:' <<< "$RECORD" | awk '{print $2,$4}'`
+	trace $funtag $answer, $PROVIDER
+
+	netaddr=`awk '{print $1}' <<< "$answer"`
+	brdcast=`awk '{print $2}' <<< "$answer"`
+
+	n=`ip2bin $netaddr`
+	b=`ip2bin $brdcast`
+
+#	trace $funtag "Nets:   "$netaddr $brdcast
+#	trace $funtag "Bits n: "$n
+#	trace $funtag "Bits b: "$b
+
+	for (( i=0; i<32; i++ ))
+	do if [ "${n:$i:1}" != "${b:$i:1}" ];then break ;fi
+	done
+
+#	trace $funtag "bitcount: $i"
+
+	if [ $i -gt 32 ]; then i=32; fi
+	echo "$netaddr/$i"
+}
+
+
+inject_fake() {
+# $1	... an IP address
+# $2	... the originator of the request
+local funtag="[${FUNCNAME[0]}]"
+local	fake_provider=NONE
+local	fake_country=NONE
+local	fake_route="$1/32"
+
+	trace "$funtag $1, $2, $fake_route, PR: $fake_provider, CO: $fake_country"
+	$IPSET add custody-low "$this_route" comment "custody-low,$ME,$CULPRIT"
+
+	sql_track=()
+	sql_track[cmd]="
+		insert into $TABLE (ip,country,origin,route,provider,regdate)
+		values ('$1','$fake_country','$2','$fake_route','$fake_provider',
+		datetime(current_timestamp,'localtime'))
+		;"
+	exec_sql sql_track	
+}
+
+#
+# Inject bandit into database and IPSET 'custody-low'
+#
+inject() {
+# $1	... an IP address
+# $2	... 2-letter country code
+# $3	... originator of request
+# $4	... whois provider (ARIN, APNIC, etc.)
+local funtag="[${FUNCNAME[0]}]"
+local	this_route
+	
+	case $4 in
+		### The global providers
+		ARIN)	this_route=`grep -E '^CIDR:'		<<< "$RECORD"	| awk '{print $2}' | head -1`
+		;;
+			# LACNIC already provides a CIDR in '^inetnum:'
+		LACNIC)	this_route=`grep -E '^inetnum:'		<<< "$RECORD"	| awk '{print $2}' | head -1`
+		;;
+		RIPE |\
+		AFRINIC) this_route=`grep -E '^[rR]oute:'	<<< "$RECORD"	| awk '{print $2}' | head -1`
+		;;
+			# APNIC often has no 'route:' entry at all
+			# A CIDR must be calculated from the network and broadcast address
+			# provided in 'inetnum:'
+		APNIC)	answer=`grep -E '^inetnum:' <<< "$RECORD" | awk '{print $2,$4}'`
+			this_route=`calc_cidr $answer`
+	;;
+	esac
+
+	# Still no route (CIDR)? Fake a point-2-point connect
+	if [ -z "$this_route" ]
+	then
+		this_route="$1/32"
+		trace "$funtag FATAL: 'this_route' is empty for '$1'"
+		trace "$funtag Fake-CIDR set: '$this_route' for $1"
+		inject_fake $1 $3
+		return 1
+	fi
+
+	#
+	# Do the final job
+	#
+	trace "$funtag $1, $2, $this_route"
+	$IPSET add custody-low "$this_route" comment "custody-low,$ME,$CULPRIT"
+
+	sql_track=()
+	sql_track[cmd]="
+		insert into $TABLE (ip,country,origin,route,provider,regdate)
+		values ('$1','$2','$3','$this_route','$4',
+			datetime(current_timestamp,'localtime') )
+		;"
+	exec_sql sql_track	
+}
+
+set_whois_real() {
+# Work on global buffer RECORD
+local funtag="[${FUNCNAME[0]}]"
+local	result
+
+	result=`grep -E '^Found a referral to' <<< "$RECORD" |\
+		awk '	{ # Strip that silly dot at the end - if any
+				print substr($NF,1,length($NF)-1)
+			}
+		'`
+	# Ignore 'rwhois.' referrals (ending in port number ':4321')
+	if [[ $result =~ :4321$ ]]
+	then	trace "$funtag Referral '$result' ignored ..."
+		result=
+	fi
+
+	echo $result
+}
+
+mk_whois_token() {
+local funtag="[${FUNCNAME[0]}]"
+	awk -v parm="$1" 'BEGIN { split(parm,elems,"."); print toupper(elems[2]) }'
+}
+
+
+# Note: For testing the function ...
+# Get a referral from a whois record
+# denoted by a 'Found a referral to' line
+#
+test_whois_referral() {
+# $1	bandit's IP address
+local funtag="[${FUNCNAME[0]}]"
+local	tag='^Found a referral to'
+local	IANA record ref_record
+local	tag_line lines remainder
+
+	IANA=`whois -h whois.iana.org $1 | grep -E '^whois:' | awk '{print $2}'`
+	record=`time whois -h $IANA $1`
+	echo "|$record|"
+
+	lines=`wc -l <<< "$record"`
+	tag_line=`grep -n -E "$tag" <<< "$record" | cut -f1 -d ":"`
+	echo "Tag line: "$tag_line
+	remainder=$(( lines - tag_line ))
+
+	echo "REF record:"
+	echo "-------------------------------------------------------------------"
+	tail "-"$remainder <<< "$record"
+}
+
+# Split a record buffered in a global variable RECORD at a tag-line
+# The tag-line is excluded
+whois_referral() {
+local funtag="[${FUNCNAME[0]}]"
+local	tag='^Found a referral to'
+local	lines tag_line remainder
+
+	lines=`wc -l <<< "$RECORD"`
+	tag_line=`grep -n -E "$tag" <<< "$RECORD" | cut -f1 -d ":"`
+	remainder=$(( lines - tag_lines ))
+
+	tail "-"$remainder <<< "$RECORD"
+}
+
+ask_iana() {
+local funtag="[${FUNCNAME[0]}]"
+local	provider
+
+	provider=`whois -h whois.iana.org $1 | grep -E '^whois:' | awk '{print $2}'`
+	trace "$funtag Provider: $provider"
+	echo "$provider"
+}
+
+guess_provider() {
+# $1	... an IP address	
+local funtag="[${FUNCNAME[0]}]"
+local	answer
+local	provider=''	# Assume 'no provider'
+
+	trace "$funtag Guessing provider; IANA doesn't know one for $1"
+
+	# Make a dumb whois request; i.e. w/o '-h' and see who answered
+	answer=`whois $1`
+
+	if [[ "$answer" =~ 'KISA/KRNIC WHOIS Service' ]]
+	then provider=whois.APNIC.net	# Translate KRNIC to APNIC
+	fi
+
+	if [[ "$answer" =~ '[ JPNIC database' ]]
+	then provider=whois.APNIC.net	# Translate JPNIC to APNIC
+	fi
+
+	if [[ "$answer" =~ '% Copyright (c) Nic.br' ]]
+	then provider=whois.LACNIC.net	# Translate BRNIC to LACNIC	
+	fi
+
+	### Did one of the RIRs answer ??
+	if [[ "$answer" =~ 'arin.net/registry/ip/' ]]
+	then
+		# If ARIN answered it can have an embedded referral !
+		if [[ "$answer" =~ "Found a referal to " ]]
+		then
+			real_url=`set_whois_real`
+			provider=$real_url
+		else	provider=whois.ARIN.net
+		fi
+	fi
+
+	if [[ "$answer" =~ '% Copyright LACNIC lacnic.net' ]]
+	then provider=whois.LACNIC.net
+	fi
+
+	if [[ "$answer" =~ '% This is the RIPE Database' ]]
+	then provider=whois.RIPE.net
+	fi
+
+	if [[ "$answer" =~ '% [whois.apnic.net]' ]]
+	then provider=whois.APNIC.net
+	fi
+
+	if [[ "$answer" =~ '% This is the AfriNIC' ]]
+	then provider=whois.AFRINIC.net
+	fi
+
+	echo "$provider"
+}
+
+get_provider() {
+# $1	... an IP address
+local funtag="[${FUNCNAME[0]}]"
+local	answer
+local	record
+local	reqsource
+
+	reqsource=IANA
+	answer=`ask_iana $1`
+
+	if [ -z "$answer" ]
+	then	trace "$funtag guessing ..."
+		answer=`guess_provider $1`
+		reqsource=GUESSED
+	fi
+
+	echo $answer $reqsource
+}
+

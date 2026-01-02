@@ -1,0 +1,21 @@
+#
+# Watcher service (systemd-style)
+#
+[Unit]
+Description=Watcher service initialization
+After=syslog.target
+After=iptables.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/etc/init.d/watcher start
+ExecReload=/etc/init.d/watcher reload
+ExecStop=/etc/init.d/watcher stop
+Environment=BOOTUP=serial
+Environment=CONSOLETYPE=serial
+StandardOutput=syslog
+StandardError=syslog
+
+[Install]
+WantedBy=basic.target

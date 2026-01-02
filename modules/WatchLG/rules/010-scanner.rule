@@ -1,0 +1,43 @@
+# - 010-Scanner.rule
+# Special ruleset to catch scanners
+# i.e. it does call 'inject' with 5 (= $MAX_AFFAIRS) 
+# The next occurence triggers a shoot-down
+#
+# Alternative to an entry in the module's superfluous_map file
+RULE="Shodan-Scanner"
+Pattern='.shodan.io\['
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 5; return $?; fi
+
+RULE="Censys-Scanner"
+Pattern='.censys-scanner.com['
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 5; return $?; fi
+
+RULE="Cyberresilience-Scanner"
+Pattern='.cyberresilience.io['
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 5; return $?; fi
+
+RULE="BinaryEdge-Scanner"
+Pattern='.binaryedge.ninja['
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 5; return $?; fi
+
+#
+# Catch all ...
+#
+
+#RULE="Generic_Scan"
+#Pattern=': invalid format'
+#---------------
+#if [[ "$REPLY" =~ "$Pattern" ]]; then inject 4; return $?; fi
+
+# REGEX of above ...
+# Note that Pattern is not enclosed in double-quotes!
+# This one makes a real REGEX (not string) match
+RULE=Banner_exchange_invalid
+Pattern=': banner exchange:.*: invalid format$'
+#---------------
+if [[ "$REPLY" =~ $Pattern ]]; then kickoff; return $?; fi
+

@@ -1,0 +1,31 @@
+#
+# Build differences files '<set>.new' and '<set>.del'
+# from current ipset members and the droplist file
+#
+mk_ip-diffs() {
+# $1    ipset name
+# $2    path to new droplist file; IPs in column 1
+local funtag="[${FUNCNAME[0]}]"
+local   this_set=$1
+local   dropfile=$2
+local   droplist="$POOL/$this_set".droplist
+local   currfile="$POOL/$this_set".current
+local   newfile="$POOL/$this_set".new
+local   delfile="$POOL/$this_set".del
+
+        rm -f $POOL/$this_set.*
+
+        # Keep current members of IPSET in a warm place
+        ipset l $this_set | grep '^[1-9]' | awk '{print $1}'| sort -V > $currfile
+
+        # Assure natural IP sort order of droplist as well
+	grep '^[1-9]' $dropfile | awk '{print $1}' | sort -V > $droplist
+
+        diff -c $currfile $droplist     |\
+        awk     -v newfile=$newfile     \
+                -v delfile=$delfile     '
+        /^[+][[:space:]]/       { print $2 > newfile }
+        /^[-][[:space:]]/       { print $2 > delfile }
+        '
+}
+

@@ -1,0 +1,48 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+#
+# - WatcherHealth -
+# See if modules died in an errorexit
+#
+
+REALPATH=$(realpath "$0")
+WHERE=$(dirname "$REALPATH")
+ME=$(basename "$REALPATH")
+cd "$WHERE" || exit 1
+. ../system.conf
+. ../watchermap.conf
+. ../common.conf
+. ../common.bashlib
+#. ../conf/private/$ME.conf
+
+trap cleanup 0 1 2 15
+cleanup() {
+:
+}
+
+mail_exittrap() {
+local funtag="[${FUNCNAME[0]}]"
+
+	mail -s "$funtag Module '$1' died on $HOSTNAME" $REPORTMAIL < /dev/null
+}
+
+
+#-------------- Main ---------------------
+: echo "$REPORTMAIL"
+cd $(Masterpath)/modules
+MODS=$(echo *)
+
+: echo "$MODS"
+
+for m in $MODS
+do
+	tail -6 $m/$m.trace | grep errorexit | grep -q "Cmd: ']'"
+	result=$?
+
+	if [ $result -eq 0 ]
+	then mail_exittrap $m
+	else : echo "Module '$m' is healthy ..."
+	fi
+done

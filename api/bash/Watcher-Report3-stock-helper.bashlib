@@ -1,0 +1,130 @@
+#
+# Private BASHlib for Watcher-Report3 - Stock report
+#
+
+#+
+# Helper functions for 'Watcher-Report'
+#-
+# Draw a section headline
+# $1 headline text
+# $2 character for line
+headline() {
+# $1	Text to show
+# $2	character for drawing	
+local funtag="[${FUNCNAME[0]}]"
+local	total=78
+
+	awk	-v text="$1" 		\
+		-v tot_width=$total 	\
+		-v char="$2"		'
+	BEGIN {
+	prefixlen=5
+	for (i=1; i<=prefixlen; i++) { prefix = prefix char }
+	strlen    = length(text);
+	suffixlen = tot_width - length(prefix) - strlen - 1; # "- 2" for the spaces
+	if (suffixlen < 0) suffixlen = 0;
+	suffix = sprintf("%*s", suffixlen, ""); # Generate space-based padding
+	gsub(" ", char, suffix);                # Replace spaces with "-"
+	print ""
+	print prefix " " text " " suffix;
+	}'
+}
+
+
+# Draw a simple separation line
+# $1 character for line
+sepline() {
+local funtag="[${FUNCNAME[0]}]"
+local	total=79
+
+	awk	-v tot_width=$total	\
+		-v char="$1"		'
+	BEGIN {
+		for (i=1; i<=tot_width; i++) { line = line char }
+		printf ("%-s", line);
+	}'
+}
+
+
+# Print a section headline
+sec_headline() {
+# $1	Section name
+# $2	character to use
+local funtag="[${FUNCNAME[0]}]"
+local	total=35
+
+	awk	-v text="$1"		\
+		-v tot_width=$total	\
+		-v char="$2"		'
+	BEGIN {
+	prefixlen=5
+	for (i=1; i<=prefixlen; i++) { prefix = prefix char }
+	strlen = length(text);
+	suffixlen = tot_width - length(prefix) - strlen - 1; # "- 2" für die Leerzeichen
+	if (suffixlen < 0) suffixlen = 0;
+	suffix = sprintf("%*s", suffixlen, ""); # Generiere leerzeichen-basiertes Padding
+	gsub(" ", char, suffix);                # Ersetze Leerzeichen mit "-"
+	print ""
+	print prefix " " text " " suffix;
+	}'
+}
+
+colheaders() {
+local funtag="[${FUNCNAME[0]}]"
+local	prefix suffix
+
+	printf "$COLFORM" "" "Records" "CIDRs" "nIPs" "xIPs"
+}
+
+lineout() {
+local funtag="[${FUNCNAME[0]}]"
+	printf "$OUTFORM" "$1" $2 $3 $4 $5
+}
+
+tot_out() {
+local funtag="[${FUNCNAME[0]}]"
+local 	-n map=$1 
+local	tot_label
+
+: echo "$funtag"
+: echo "incomming tot lable '${map[label]}'"
+	if [ -z "${map[label]}" ]
+	then tot_label="Total records & DROPs"
+	else tot_label="${map[label]}"
+	fi
+
+	if [ -z "$tot_label" ]
+	then echo "BANG!"; return
+	fi
+
+	sepline _
+	echo
+	printf "$TOTFORM" "$tot_label" ${map[records]} ${map[cidrs]} ${map[plain]} ${map[nodes]}
+}
+
+# Calculate total nodes for CIDRs
+# $1 DROP list name
+calc_subips() {
+local funtag="[${FUNCNAME[0]}]"
+local   elems
+
+	elems=$(ipset list $1 | grep '^[1-9]' | grep -E '.*/[0-9]{1,2}\ ')
+
+        awk '
+        BEGIN   { total = 0 }
+		{ 
+		#	x = split($0, parts, "/" )
+			x = split($1, parts, "/" )
+			if ( parts[2] == "") next
+			bits   = (32 - parts[2])
+#			range  = 2^bits
+			range  = lshift(1,bits)
+			total += range
+		}
+	END	{
+		print total
+	}
+	' <<< "$elems"
+}
+
+# vim: set filetype=sh noexpandtab tabstop=8 shiftwidth=8 autoindent smartindent :

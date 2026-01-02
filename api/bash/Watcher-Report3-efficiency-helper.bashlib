@@ -1,0 +1,297 @@
+##################################################
+# Formatting functions for efficiency report
+##################################################
+_LABELW=60
+OUTFORM="%-60s : %8d %8d %8d %'15d\n"
+TOTFORM="%60s » %8d %8d %8d %'15d\n"
+DETFORM="%60s . %8d %8d %8d %'15d\n"
+COLFORM="%60s | %8s %8s %8s %15s\n"
+
+
+# Draw a section headline
+# $1 headline text
+# $2 character for line
+# $3 length (optional)
+headline() {
+local funtag="[${FUNCNAME[0]}]"
+#local	total=60
+local	total=${3:-80}
+
+	awk 	-v text="$1"		\
+		-v tot_width=$total 	\
+		-v char="$2"		'
+	BEGIN {
+	prefixlen=5
+	for (i=1; i<=prefixlen; i++) { prefix = prefix char }
+	strlen = length(text);
+	suffixlen = tot_width - length(prefix) - strlen - 2; # "- 2" for spaces
+	if (suffixlen < 0) suffixlen = 0;
+	suffix = sprintf("%*s", suffixlen, ""); # Generate space-based padding
+	gsub(" ", char, suffix);                # Substitute spaces with <char>
+	print prefix " " text " " suffix;
+	}'
+}
+
+box_head() {
+local funtag="[${FUNCNAME[0]}]"
+
+}
+
+# Draw a simple separation line
+# $1 character for line
+# $2 length (optional)
+sepline() {
+local funtag="[${FUNCNAME[0]}]"
+#local	total=79
+local	total=${2:-99}
+
+	awk -v tot_width=$total -v char="$1" '
+	BEGIN {
+		for (i=1; i<=tot_width; i++) { line = line char }
+		print line;
+	}'
+}
+
+# Print a section headline
+sec_headline() {
+# $1	Section name
+# $2	character to use
+# $3	length (optional)
+local funtag="[${FUNCNAME[0]}]"
+#local	total=53
+local	total=${3:-62}
+
+	awk -v text="$1" -v tot_width=$total -v char="$2" '
+	BEGIN {
+	prefixlen=5
+	for (i=1; i<=prefixlen; i++) { prefix = prefix char }
+	strlen = length(text);
+	suffixlen = tot_width - length(prefix) - strlen - 1; # "- 2" for spaces
+	if (suffixlen < 0) suffixlen = 0;
+	suffix = sprintf("%*s", suffixlen, ""); # Generate space-basad padding
+	gsub(" ", char, suffix);                # Replace spaces by dots
+	print ""
+	print prefix " " text " " suffix;
+	}'
+}
+
+
+################################################################################
+# Caculation helpers
+################################################################################
+#
+# Cummulate packets from legal access taken from the WATCGCNT chain
+cummulate_passed_connections() {
+local funtag="[${FUNCNAME[0]}]"
+local   report
+
+        awk '
+        BEGIN { sum=0 }
+        /(tcp dpt:)/    { sum += $1 }
+        END             { print sum }
+        ' <<< $(iptables -vnL WATCHCNT)
+}
+
+cummulate_passthru_connections() {
+local funtag="[${FUNCNAME[0]}]"
+local   report
+
+        awk '
+        BEGIN { packets=0 }
+        /^[1-9]/        {
+                                # Extract packet count ...
+                                match($0, /packets ([0-9]+)/, tmp)
+                                packets += tmp[1]
+                        }
+        END             { print packets }
+        ' <<< $(ipset l passthru)
+}
+
+
+# Get IPset condidions
+# for a [table, chain, ipset name] combo
+get_set_conditions() {
+# $1    the table (raw, mangle, filter)
+# $2    the chain
+# $3    the ipset name
+local funtag="[${FUNCNAME[0]}]"
+
+	# Return a tuple of (packets, bytes, jump-target)
+        iptables -t "$1" -vxnL "$2" |\
+        awk -v ipsetname="$3" '
+                $0 ~ "match-set[[:space:]]+" ipsetname "([[:space:]]|$)" { print $1,$2,$3 }
+        '
+}
+
+get_cidrs() {
+# $1	target type (DROP, ACCEPT)	
+local funtag="[${FUNCNAME[0]}]"
+local	target=$1
+local	name names all_names clean_names t
+local	tables="raw mangle filter"
+local	tmpips
+
+	for t in $tables
+	do 
+		names=$(get_ipset_names $t $target)
+
+		for name in $names
+		do 
+#			printf "DEBUG: %15s %s\n" $t $name # DEBUG
+			all_names="$all_names $names"
+		done
+
+		# Deduplicate 'all_names'
+		# 'all_names' is a one-liner with redundancies
+		clean_names=$(
+		awk '
+			{	
+				x=split($0,parts, " ")
+				for (i=1; i <= x; i++) {
+					names[parts[i]] = parts[i]
+				}
+			}
+		END {
+			for (name in names) {
+				namelist = namelist name " "
+			}
+			print namelist
+		}	
+		' <<< "$all_names")
+	done
+
+	echo "DEBUG clean_names: $clean_names" > /dev/tty
+
+	# Now get all members from sets in clean_names
+	# Members start with a digit in col #1
+	for name in $clean_names
+	do
+		tmpips="$tmpips $(ipset l $name | grep '^[1..9]' | awk '{ print $1 }')" 
+	done
+
+	echo "$tmpips"
+}
+
+
+get_ipset_names() {
+# $1	table name
+# $2	target name (DROP,ACCEPT)
+local funtag="[${FUNCNAME[0]}]"
+local	table=$1
+local	target=$2
+local	names tmp_names
+
+	tmp_names=$(iptables -t $table -nL | grep 'match-set'| grep $target)
+
+	awk '
+		@include "words.awklib"
+		{
+			# Pick word after "match-set"
+			# match($0,"match-set[[:space:]]+",tmp)
+			#name		= tmp[1]
+			name		= word_after("match-set", $0)
+			names[name] 	= name " "
+		}
+	END {
+		for (name in names) {
+			namelist = namelist names[name]
+		}
+		print namelist
+	}	
+	' <<< "$tmp_names"
+}
+
+
+# Calculate extended IPs from CIDR notations
+# Read list from pipe
+calc_xips() { # OBSOLETE!
+# $1	a list with IP addresses	
+local funtag="[${FUNCNAME[0]}]"
+
+	awk '
+	BEGIN	{ total = 0 }
+		{
+			x = split($1, parts, "/" )
+			if ( parts[2] == "") next
+			bits   = (32 - parts[2])
+			range  = 2^bits
+			total += range
+		}
+	END     { print total }
+	' <<< "$1"
+}
+
+
+calc_xips_pipe() {
+	awk '
+		{
+			x = split($1, parts, "/" )
+			if ( parts[2] == "") next
+			mask   = parts[2]	
+			bits   = (32 - mask)
+			range  = lshift(1,bits)
+			total += range
+		}
+		END { print total }
+	'
+}
+
+
+resolve_records() {
+local funtag="[${FUNCNAME[0]}]"
+local	ips xips tot_ips
+local	cidrs cidrm
+
+#	ips=$($SQL   "select count(membertype) from ipsets where membertype='IP'")
+#	cidrs=$($SQL "select count(membertype) from ipsets where membertype='CIDR'")
+#	cidrm=$($SQL "select member from ipsets where membertype='CIDR'")
+
+###	This does _not_ differentiate between 'DROP' and 'ACCEPT!'
+#	ips=$(ipset l   | grep '^[1-9]'  | awk '{print $1}'| grep -cv "/")
+#	cidrs=$(ipset l | grep '^[1-9]'  | awk '{print $1}'| grep -c  "/")
+#	cidrm=$(ipset l | grep '^[1-9]')
+
+	sec_headline "Effective DROPs & ACCEPTs" _
+	### DROPs ...
+	printf "%36s %-11s\n"  "» DROPs _________________" "______________"
+	drop_ips=$($SQL   "select count(membertype) from ipsets
+				where	membertype	='IP'
+				and	target		='DROP'"
+			)
+	drop_cidrs=$($SQL "select count(membertype) from ipsets
+				where	membertype	='CIDR'
+				and	target		='DROP'"
+			)
+	xips=$( $SQL "select distinct member from ipsets 
+				where	membertype	='CIDR'
+				and	target		='DROP'" |\
+		calc_xips_pipe )
+
+	printf "%50s:%14d\n"  "................ nIPs" $drop_ips
+	printf "%50s:%14d\n"  "............... CIDRs" $drop_cidrs
+	printf "%50s:%'14d\n" "................ xIPs" $xips
+	printf "%50s:%'14d\n" ".... Total DROPed IPs" $(( drop_ips + xips ))
+
+	### ACCEPTs ...
+	printf "%51s %-11s\n"  "» ACCEPTs _______________" "______________"
+	accept_ips=$($SQL   "select count(distinct member) from ipsets 
+				where	membertype	='IP'
+				and	target		='ACCEPT'"
+			)
+	accept_cidrs=$($SQL "select count(distinct member) from ipsets
+				where	membertype	='CIDR'
+				and	target		='ACCEPT'"
+			)
+	xips=$( $SQL "select distinct member from ipsets
+				where membertype	='CIDR'
+				and	target		='ACCEPT'" |\
+		calc_xips_pipe )
+
+	printf "%50s:%14d\n"  "................ nIPs" $accept_ips
+	printf "%50s:%14d\n"  "............... CIDRs" $accept_cidrs
+	printf "%50s:%'14d\n" "................ xIPs" $xips
+	printf "%50s:%'14d\n" ".. Total ACCEPTed IPs" $(( accept_ips + xips ))
+	echo
+}
+
+# vim: set filetype=sh noexpandtab tabstop=8 shiftwidth=8 autoindent smartindent :

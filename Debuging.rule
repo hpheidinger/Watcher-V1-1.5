@@ -1,0 +1,14 @@
+local debugs="@nodebug|@notrace|@alloff|@debug|@debug2|@trace"
+local debfun
+
+RULE=SetDebug
+
+if [[ "$REPLY" =~ ($debugs) ]]
+then
+    debfun=${BASH_REMATCH[1]}	# Extract found matches
+    trace "$funtag Debuging $debfun wanted"
+    setdebug "$debfun"
+    Pattern="$debfun"		# Let the post processor know the choice ...
+    return 241   
+fi
+# ------------- End: debug settings ----------------------------------------

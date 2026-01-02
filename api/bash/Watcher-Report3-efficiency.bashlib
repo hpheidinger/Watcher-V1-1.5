@@ -1,0 +1,419 @@
+#
+# Private BASHlib for Watcher-Report3	- Efficiency report
+#
+. Watcher-Report3-efficiency-helper.bashlib
+. Watcher-Report3-efficiency-stats.bashlib
+
+# Output formats
+_LABELW=50
+OUTFORM="%-50s %12d %15d\n"
+TOTFORM="%50s:%12d %15d\n"
+EFFFORM="%50s:%12.2f%% %s\n"
+export OUTFORM TOTFORM EFFFORM
+
+DBfile="$POOL/$ME.db"
+SQL="sqlite3 $DBfile"
+
+# Top levels (global)
+TLtables="raw mangle filter"
+
+###
+# Entry wrapper for the efficiency report
+###
+report_efficiency() {
+local funtag="[${FUNCNAME[0]}]"
+local	since now watcherup days rest
+local	total_connections=0 total_passed_connections=0
+local	firewall_records efficiency
+local	ipset_name counter
+local	invalid="INVALID"
+local	repmode=$1
+
+	FILT_START=$(date +%s%3N)
+
+	#echo "Report mode: $repmode"
+
+	if [ ! -e $POOL/EFF_MIN ]
+	then echo "100.0" > $POOL/EFF_MIN
+	fi
+
+	if [ ! -e $POOL/EFF_MAX ]
+	then echo "0.0" > $POOL/EFF_MAX
+	fi
+
+	case $repmode in
+		stats)	report_stats
+			echo "$repmode: Terminating ..."
+			exit	
+	;;
+	esac
+
+	DB_preload
+	echo "$PRODUCT $REVISION - $ME on $HOSTNAME" 2>&1
+
+	read tmptime < $(Masterpath)/START_TIME
+	now=$(date +%s)
+	watcherup=$(( now - tmptime ))
+	the_date=$(date -d @$tmptime --iso=date)
+	the_time=$(date -d @$tmptime +%T)
+	echo	"Time stamp    : $(date --iso) $(date +%T)"
+	echo 	"Up since      : $the_date $the_time"
+	days=$(( watcherup / 86400 ))
+	rest=$(( watcherup % 86400 ))
+	echo	"Watcher uptime: $days d, $(date +%H:%M:%S -ud@$rest)"
+	echo
+
+	headline "Connection attempts of DROPed bandits" = 80
+
+	# Collect all DROP ipsets from the database
+	mapfile -t drop_ipsets < <(sqlite3 $DBfile "SELECT DISTINCT ipset FROM ipsets WHERE target = 'DROP';")
+
+	# Iterate and sum up counters for each DROP ipset
+	for ipset_name in "${drop_ipsets[@]}"
+	do
+		counter=$(ipset -t list "$ipset_name" | awk '/^Number of packets:/ {print $4}')
+		total_connections=$(( total_connections + counter ))
+	done
+
+	report=$(dropped_packets)
+	echo "$report"
+
+	total_connections=$( grep "Total DROPed connections" <<< "$report" | awk '{ print $4 }' )
+
+
+	# Get total passed connections (ACCEPT chain)
+	total_passed_connections=$(cummulate_passed_connections)
+
+	# Get total passthru connections (ACCEPT chain) white-bots
+	total_passthru_connections=$(cummulate_passthru_connections)
+
+	# Print the results
+	sec_headline Summary '*'
+	printf "%50s:%12d\n" "Total DROPed connections"	  $total_connections
+	printf "%50s:%12d\n" "Total passed connections"	  $total_passed_connections
+	printf "%50s:%12d\n" "Total passthru connections" $total_passthru_connections
+
+	firewall_records=$(ipset -t list | awk '/Number of/ { sum += $4 } END {print sum}')
+	printf "%50s:%12d\n" "Total records in firewall" $firewall_records
+
+#	resolve_records
+
+	# Calculate efficiency (avoid division by zero)
+	if [ $((total_connections + total_passed_connections)) -gt 0 ]
+	then
+		PT=$total_passthru_connections
+		efficiency=$(echo "scale=3; ($total_connections / ($total_connections + $total_passed_connections  )) * 100" | bc)
+	else	efficiency="0.00"
+	fi
+
+	if [ $total_connections -gt 0 ]
+	then	
+		read min < $POOL/EFF_MIN
+		read max < $POOL/EFF_MAX
+		invalid=""
+	fi
+
+	sec_headline Efficiency _
+	echo "$total_connections $total_passed_connections $total_passthru_connections " |\
+	awk 	-v pool="$POOL"			\
+		-v efficiency="$efficiency" 	\
+		-v min_efficiency="$min"	\
+		-v max_efficiency="$max"	\
+		-v invalid="$invalid"		\
+	'
+	BEGIN { }
+	{
+		total_connections		= $1
+		total_passed_connections	= $2
+		total_passthru_connections	= $3
+
+		# Aktualisiere max/min Effizienz nur bei Veränderung
+		if (efficiency > max_efficiency) {
+			max_efficiency = efficiency
+			print max_efficiency > pool"/EFF_MAX"
+		}
+
+		if (efficiency < min_efficiency) {
+			min_efficiency = efficiency
+			print min_efficiency > pool"/EFF_MIN"
+		}
+
+		# Format output
+		printf "%50s:%12.2f%% %s\n", "Current", efficiency, invalid
+		printf "%50s:%12.2f%% %s\n", "... min", min_efficiency, invalid
+		printf "%50s:%12.2f%% %s\n", "... max", max_efficiency, invalid
+	}'
+
+	sec_headline Legend '·'
+	echo "
+	passthru 	- Count of 'white bots'
+	TD/TP 		~ Total dropped/passed 
+	Efficiency	= TD / (TD+TP)
+	"
+
+	FILT_END=$(date +%s%3N)
+	FILT_TIME=$(( FILT_END - FILT_START))
+	printf "%s took %d ms\n" $funtag $FILT_TIME
+}
+
+
+DB_preload() {
+local funtag="[${FUNCNAME[0]}]"
+local	csvfile="$POOL/$ME-import.csv"
+local	tmpfile="$POOL/$ME-ipset_members.tmp"
+local	TLchains OSI
+
+	# Clear CSV and temporary file
+	> "$csvfile"
+	> "$tmpfile"
+
+	### Phase #1
+	### Categorize firewall and merge with members
+
+	# Iterate over tables and chains, collect relevant ipsets
+	for table in $TLtables
+	do
+		case $table in
+			raw)	TLchains="PREROUTING";		OSI=3
+			;;
+			mangle)	TLchains="PREROUTING";		OSI=4
+			;;
+			filter)	TLchains="INPUT FORWARD"; 	OSI=5
+			;;
+			*)	echo "$funtag Illegal table '$table'"
+				return 1
+		;;
+		esac
+
+		for chain in $TLchains
+		do	: echo "$funtag Doing for table/chain: '$table/$chain'"	# DEBUG
+			# Extract relevant sets for this table/chain
+			relevant_sets=$(
+				iptables -t "$table" -nL "$chain" |\
+				awk 'match($0,/match-set[[:space:]]+([A-Za-z0-9@._-]+)/,a){print a[1]}' 
+				)
+
+			# Finally mangle 'category parameters' with 'ipset member data'
+			# 'category parameters'@'member data'	
+			for ipset in $relevant_sets
+			do
+				# # Get jump target
+				# TARGET=$(get_jump_target $table $chain $ipset)
+
+				# Get set conditions in a tuple (packets, bytes, jump-target)
+				# from iptables for this particular [table,chain,ipset] category
+				SET_COND=$(get_set_conditions $table $chain $ipset)
+				read PACKETS BYTES TARGET <<< "$SET_COND"
+
+				: echo "Packets: $PACKETS"
+				: echo "Bytes  : $BYTES"
+				: echo "Target : $TARGET"
+
+				# Don't care if cumulated packets are '0'
+				[ "$PACKETS" -eq 0 ] && continue
+
+
+				# Provided sanity is given ...
+				# Dump all members into tmpfile, prefixed with
+				# loop parameters: table, chain, ipset, target
+				ipset list "$ipset"		|\
+				awk 	-v table="$table" 	\
+					-v chain="$chain" 	\
+					-v ipset="$ipset"	\
+					-v target="$TARGET"	'
+					/^[0-9]/	{ # Members start with a digit in coloumn 1!
+								print table, chain, ipset, target, "Member:"$0 
+							}
+				' >> "$tmpfile"
+			done
+		done
+	done
+
+	### Phase #2
+	### Create real CSV file from categorization in tmpfile
+
+	#
+	# Process tmpfile in one awk pass and write CSV
+	#
+	awk 	-v OFS="," '
+	BEGIN {
+	#	print "member","member_type","ipset","chain","iptable","osi","target","comment","packets","bytes"
+	}	
+	{
+		# Pick the category parameters
+		table	= $1
+		chain	= $2
+		setname	= $3
+		target	= $4
+
+		# Collect the IPset member line part from $0
+		memberline = ""
+
+		split($0, parts,"Member:")
+		categories = parts[1]
+		memberline = parts[2]
+
+		# Member value
+		split(memberline, f, " ")
+		member=f[1]
+		membertype=(index(member,"/")>0)?"CIDR":"IP"
+
+		# Extract real member attributes
+		comment	= ""
+		packets	= 0
+		bytes	= 0
+		if (match(memberline,/comment[[:space:]]*"([^"]+)"/,c)) comment=c[1]
+		if (match(memberline,/packets[[:space:]]+([0-9]+)/,p))	packets=p[1]
+		if (match(memberline,/bytes[[:space:]]+([0-9]+)/,b))	bytes=b[1]
+
+		# OSI value passed from table mapping
+		osi 	= (table=="raw") ? 3 : (table=="mangle") ? 4 : (table=="filter") ? 5 : 0
+
+		# Print CSV line, comment is quoted
+		printf "%s,%s,%s,%s,%s,%d,%s,\"%s\",%d,%d\n", \
+			member,		\
+			membertype,	\
+			setname,	\
+			chain,		\
+			table,		\
+			osi,		\
+			target,		\
+			comment,	\
+			packets,	\
+			bytes		\
+			>> "'"$csvfile"'"
+	}
+	' "$tmpfile"
+
+	rm -f "$tmpfile"
+
+	# Call DB_dump to import CSV into SQLite
+	DB_dump "$csvfile"
+}
+
+
+DB_dump() {
+local funtag="[${FUNCNAME[0]}]"
+local   Schema="
+		drop table IF EXISTS ipsets;
+		create table ipsets (
+			member		text,		-- IP addr
+			membertype	text,		-- Addr type: IP, CIDR
+			ipset		text,		-- The IPSET
+			chain		text,		-- Master chain: INPUT/FORWARD or PREROUTING
+			iptable		text,		-- iptables table: raw, mangle, filter
+			osi		integer,	-- OSI-Layer (2/3/5 …)
+			target		text,		-- Jump target: ACCEPT, DROP, ...
+			comment		text NOT NULL,
+			packets		integer,	-- members packet count
+			bytes		integer,	-- members byte  count
+			PRIMARY KEY	(iptable, chain, ipset, member)
+		);"
+
+	>$DBfile
+	echo "$Schema" | $SQL
+
+	$SQL <<-EOF
+	.mode csv
+	.separator ","
+	.import $1 ipsets
+	EOF
+
+	rm -f $1   # optional
+}
+
+
+#
+# Dropped packets determination - Basis for efficiency calculations
+#
+dropped_packets() {
+local funtag="[${FUNCNAME[0]}]"
+local	resultset report total_connections
+
+	# Get all DROP entries, incl. OSI 
+	resultset=$($SQL "SELECT member, packets, bytes, comment, iptable, chain, osi FROM ipsets WHERE target = 'DROP';")
+
+#	resultset=$($SQL "SELECT member, packets, bytes, comment, iptable, chain, osi FROM ipsets WHERE target = 'ACCEPT';")
+
+	# If empty return an empty report structure and set totals to '0'
+	if [ -z "$resultset" ]
+	then
+		echo "[NO DATA]"
+		total_connections=0
+		return
+	fi
+
+
+	printf "%-50s %12s %15s\n" "IPset comment" "Packets" "Bytes"
+	sepline – 80
+
+	report=$(printf '%s\n' "$resultset" |\
+	awk -F'|' '
+	BEGIN	{
+		outform = ENVIRON["OUTFORM"]
+		gsub(/\\n/, "\n", outform)
+	}
+	{
+		member	= $1
+		packets = ($2+0)
+		bytes	= ($3+0)
+		comment = $4
+		iptable = $5
+		chain	= $6
+		osi	= $7
+
+		if (packets == 0) next
+
+		group	= iptable "/" chain
+		key	= group "|" comment
+
+		groups[group]   =	osi	# Keep OSI-Level for group
+		keys[key]	=	key
+		packet_sum[key] +=	packets
+		byte_sum[key]   +=	bytes
+	}
+	END {
+		gi = 0
+		for (g in groups) group_arr[++gi] = g
+		if (gi > 0) asort(group_arr)
+
+		total_packets = 0
+		total_bytes   = 0
+
+		for (i = 1; i <= gi; i++) {
+			group = group_arr[i]
+			osi   = groups[group]
+			printf "–––– %s (~ OSI level: %d) –––––––\n", group, osi
+
+			ci = 0
+			delete comment_arr
+			for (k in keys) {
+				split(k, parts, "|")
+				if (parts[1] == group) comment_arr[++ci] = parts[2]
+			}
+			if (ci > 0) asort(comment_arr)
+
+			for (j = 1; j <= ci; j++) {
+				c = comment_arr[j]
+				k = group "|" c
+			
+			#	printf "%-50s %12d %15d\n", c, packet_sum[k], byte_sum[k]
+				printf (outform, c, packet_sum[k], byte_sum[k])
+				total_packets += packet_sum[k]
+				total_bytes   += byte_sum[k]
+			}
+		}
+
+		print sep
+		printf "%50s:%12d %15d\n", "Total DROPed connections", total_packets, total_bytes
+	}
+	'
+	sepline – 80
+	)
+
+	echo "$report"
+
+	total_connections=$(grep "Total DROPed connections" <<< "$report" | awk '{print $4}')
+}
+
+# vim: set filetype=sh noexpandtab tabstop=8 shiftwidth=8 autoindent smartindent :

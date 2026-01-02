@@ -1,0 +1,105 @@
+#!/bin/bash
+#–––––––––––––––––––––––––––––––– Preamble –––––––––––––––––––––––––
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then			_TRACE=$1; shift; fi
+
+############################################################
+#	- Watcher-Stats - Rev. 1 
+#	- Generate statitic views from the Watcher-Stats-DB
+#	  i.e. Create views on screen or generate CSV-Files
+#	  to work them out in spreadsheet software
+############################################################
+#--- Mandatory ----------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../system.conf
+. ../watchermap.conf
+. ../common.conf
+. ../common.bashlib
+#--- API stuff ----------
+. ../api/bash/$ME.bashlib
+. ../api/bash/sql-lite.bashlib
+#--- Private stuff ------
+. ../conf/private/$ME.conf
+#–––––––––––––––––––––––––––––––– Preamble END ––––––––––––––––––––––
+PROC_START=$(date +%s%3N)
+
+_usage() {
+	echo "Usage: $ME ...
+	-M report_email	Mail with specific email address
+			(implies -m)
+	-X keepdays	Expire Stats-DB with parameter
+	-m		Mail to default $REPORTMAIL
+	-s kind		Specific report 'kind'
+	-x		Expire with configured defaulte
+	"
+
+	exit
+}
+
+dump_map() {
+local funtag="[${FUNCNAME[0]}]"
+local	-n map="$1"
+local	key
+	
+	echo "»»»» $funtag »»»»»»»»»»»»[ Map $1 ]»»»»»»»»»»»»»»»" >&2
+
+	for key in "${!map[@]}"
+	do printf "»»» %-20s | %s\n" "$key" "${map[$key]}"
+	done | sort
+
+	echo "««««« $funtag «««««««««««[ End Map ]««««««««««««««" >&2
+}
+
+
+#____________________ Main __________________________________________
+echo "««« $ME is beta state »»»"
+
+# Here we go ...
+while getopts "?hM:X:ms:x" opts
+do
+        case $opts in
+		'M')		# Set specific mail address and mail
+				# implies -m
+				REPORTMAIL=$OPTARG
+				export  DOMAIL=1
+                ;;
+                'X')            # Expire stats-DB with value
+				EXP_DAYS=$OPTARG
+				expire_stats $EXP_DAYS
+				exit
+		;;		
+		'm')		# mail to configured $REPORTMAIL
+				export DOMAIL=1
+		;;
+		'x')            # Expire stats-DB with configured default
+                                expire_stats $EXPIRATION_DAYS
+                                exit
+                ;;
+                's')            # View a specific statistics
+				REPORTFACT=$OPTARG
+                                if [[ $REPORTFACT == "" ]]
+                                then REPORTFACT="_all_"
+                                fi
+                ;;
+                '?'|'h')        _usage
+        ;;
+        esac
+done
+
+#--- Ensure stat-DB exists ---------------------------------------
+if [ ! -e "$DB" ]
+then
+	(cd $MASTER_PATH; sqlite3 $ME.db < "$ME.schema")
+	echo "Database '$DB' does not exist ... creating it!"
+else	echo "Database '$DB' exists - just fine ..."
+fi
+
+report_stats	# Call master wrapper from library
+
+PROC_END=$(date +%s%3N)
+PROC_TIM=$(( PROC_END - PROC_START ))
+echo "« Finished $ME: Job took $PROC_TIM ms »"

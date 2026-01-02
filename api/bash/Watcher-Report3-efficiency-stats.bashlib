@@ -1,0 +1,323 @@
+#
+# Statistic functions for efficiency report
+#
+REPORT_MODULES="lg mx mb wb geo"
+STATS_DB="$(Masterpath)/Watcher-Stats.db"
+STATS_SQL="sqlite3 $STATS_DB"
+
+declare -A      sql_parms
+declare -A      stats_resultset
+declare -A	eff_data
+
+report_stats() {
+local funtag="[${FUNCNAME[0]}]"
+local	code_status="BETA"
+
+        echo $funtag $code_status
+        echo $funtag "DB: "$STATS_DB
+        if [ ! -e $STATS_DB ]
+        then    mk_statsDB $STATS_DB
+        #else    echo "DB $STATS_DB exists - fine"        
+        fi
+
+        # Databse exists now - drop in data
+	# - Rope-ladder -
+	report_stats_efficiency	# Must come first of all!
+#	report_stats_procrates
+#	report_stats_looprates
+#	report_stats_sqlrates
+#	report_stats_common
+}
+
+mk_statsDB() {
+local funtag="[${FUNCNAME[0]}]"
+local   DBname=$(basename $STATS_DB .db)
+local	schema=$DBname.schema
+
+	if [ ! -e "$STATS_DB" ]
+	then	echo $funtag "creating Watcher statistics DB $STATS_DB from schema"
+		$STATS_SQL < $MASTER_PATH/$schema
+		# Drop in essentials
+		$STATS_SQL "insert into stats_summary (db_init)	
+				values ( datetime(current_timestamp,'localtime') );"
+		$STATS_SQL "insert into stats_summary (event_stamp)
+				values ( datetime(current_timestamp,'localtime') );"
+	fi
+}
+
+# Punch a record into stats database
+punchDB() {
+# $1	a 'map' of values from caller	
+local funtag="[${FUNCNAME[0]}]"
+local -n par_map=$1
+local	caller=$(caller 0)
+local	call_line=$(awk '{print $1}' <<< "$caller")
+local	called_by=$(awk '{print $2}' <<< "$caller")
+local   query=${par_map[cmd]}
+
+	echo $funtag "Caller: $called_by from line: $call_line"
+	echo "SQL execute: $query"
+	$STATS_SQL "$query"
+}
+
+report_stats_efficiency() { 
+local funtag="[${FUNCNAME[0]}]"
+local	ex_cmd="Watcher-Report -e"
+local	ratecmd="Efficiency"
+local	report efficiencies
+
+	echo $funtag
+	report=$($ex_cmd)
+	eff_data[report]="$report"
+
+	# echo "$report"	# DEBUG
+	efficiencies=$( grep -A 4 'Efficiency' <<< "$report" )
+	eff_data[cur]=$(grep 'Current:'	<<< "$efficiencies" | awk '{ print $2 }' | tr -d '%')
+	eff_data[min]=$(grep '... min:'	<<< "$efficiencies" | awk '{ print $3 }' | tr -d '%')
+	eff_data[max]=$(grep '... max:'	<<< "$efficiencies" | awk '{ print $3 }' | tr -d '%')
+
+	if [ -n "$_DEBUG" ]
+	then	
+		echo "Current: ${eff_data[cur]}"
+		echo "Min    : ${eff_data[min]}"
+		echo "Max    : ${eff_data[max]}"
+	fi
+
+	sql_parms=()
+        sql_parms[cmd]="
+		insert into efficiency_stats
+			( 	event_stamp,
+				active,
+     				origin,
+				eff_cur,
+				eff_min,
+				eff_max		)
+		values	(	datetime(current_timestamp,'localtime'),
+				1,
+				'$ratecmd',
+				'${eff_data[cur]}',
+				'${eff_data[min]}',
+				'${eff_data[max]}'	)
+                ;"
+	punchDB sql_parms
+}
+
+report_stats_procrates() {
+local funtag="[${FUNCNAME[0]}]"
+local	ratecmd="Procrate"
+local	record modname
+local	tmp_record tmp_loop tmp_filter
+local	records 
+local	loop_min	loop_max	loop_avg
+local	loop_med	loop_proc 
+local	filter_min	filter_max	filter_avg 
+local	filter_med	filter_procs
+
+	for modname in $REPORT_MODULES
+	do 
+		record=$(fetch_rate_record $ratecmd $modname)
+		echo $funtag 
+		# echo "$record"	# DEBUG
+		# Get relevant value lines from record
+		tmp_record=$(grep '^Records'	<<< $record)
+		tmp_loop=$(  grep '^Loop'	<<< $record)
+		tmp_filter=$(grep '^Filter'	<<< $record)
+
+		# Parse into fields
+		records=$(	awk '{print $2}'	<<< $tmp_record)
+		
+		loop_min=$(	awk '{print $2}'	<<< $tmp_loop)
+		loop_max=$(	awk '{print $3}'	<<< $tmp_loop)
+		loop_avg=$(	awk '{print $4}'	<<< $tmp_loop)
+		loop_med=$(	awk '{print $5}'	<<< $tmp_loop)
+		loop_procs=$(	awk '{print $6}'	<<< $tmp_loop)
+
+		filter_min=$(	awk '{print $2}'	<<< $tmp_filter)
+		filter_max=$(	awk '{print $3}'	<<< $tmp_filter)
+		filter_avg=$(	awk '{print $4}'	<<< $tmp_filter)
+		filter_med=$(	awk '{print $5}'	<<< $tmp_filter)
+		filter_procs=$(	awk '{print $6}'	<<< $tmp_filter)
+
+		if [ -n "$_DEBUG" ]
+		then	
+			echo $funtag $ratecmd $modname
+			echo "Records     : $records"
+			echo "Loop min    : $loop_min"
+			echo "Loop max    : $loop_max"
+			echo "Loop avg    : $loop_avg"
+			echo "Loop med    : $loop_med"
+			echo "Loop procs  : $loop_procs"
+
+			echo "Filter min  : $filter_min"
+			echo "Filter max  : $filter_max"
+			echo "Filter avg  : $filter_avg"
+			echo "Filter med  : $filter_med"
+			echo "Filter procs: $filter_procs"
+		fi
+	done
+
+	# Data is collected - punch SQL record
+	sql_parms=()
+        sql_parms[cmd]="
+		insert into rates_stats
+			( 	event_stamp,
+				active,
+     				origin,
+				records,
+				rate_loop_min,	rate_loop_max,	rate_loop_avg,
+				rate_loop_med,	rate_loop_procs,
+				rate_filter_min, rate_filter_max, rate_filter_avg,
+				rate_filter_med, rate_filter_proc	)
+		values	(	datetime(current_timestamp,'localtime'),
+				1,
+				'$ratecmd',
+				'$records',
+				'$loop_min',	'$loop_max',	'$loop_avg',
+				'$loop_med',	'$loop_procs',
+				'$filter_min',	'$filter_max',	'$filter_avg',
+				'$filter_med',	'$filter_procs'		)
+                ;"
+	punchDB sql_parms
+
+	stats_result=${stats_resultset[sqlresult]}
+
+	echo "SQL result: '$stats_result'"
+}
+
+
+# Note: sql rates have no 'filter' times, just 'loop' time
+report_stats_sqlrates() {
+local funtag="[${FUNCNAME[0]}]"
+local	ratecmd="Sqlrate"
+local	record modname
+local	tmp_record tmp_loop
+local	loop_min loop_max loop_avg loop_med loop_procs
+
+	for modname in $REPORT_MODULES
+	do 
+		record=$(fetch_rate_record $ratecmd $modname)
+		echo $funtag
+		# echo "$record"	# DEBUG
+
+		echo $funtag $ratecmd $modname
+
+		# Get relevant value lines from record
+		# sql rates have no filter ... omited
+		tmp_record=$(grep '^Records'	<<< $record)
+		tmp_loop=$(  grep '^Loop'	<<< $record)
+
+		# Parse into fields
+		records=$(	awk '{print $2}'	<<< $tmp_record)
+
+		loop_min=$(	awk '{print $2}'	<<< $tmp_loop)
+		loop_max=$(	awk '{print $3}'	<<< $tmp_loop)
+		loop_avg=$(	awk '{print $4}'	<<< $tmp_loop)
+		loop_med=$(	awk '{print $5}'	<<< $tmp_loop)
+		loop_procs=$(	awk '{print $6}'	<<< $tmp_loop)
+
+		if [ -n "$_DEBUG" ]
+		then	
+			echo "Records     : $records"
+			echo "Loop min    : $loop_min"
+			echo "Loop max    : $loop_max"
+			echo "Loop avg    : $loop_avg"
+			echo "Loop med    : $loop_med"
+			echo "Loop procs  : $loop_procs"
+		fi
+	done
+
+        sql_parms=()
+        sql_parms[cmd]="
+                insert into rates_stats
+                        (       event_stamp,
+				active,
+                                origin,
+                                records,
+                                rate_loop_min, rate_loop_max, rate_loop_avg,
+                                rate_loop_med, rate_loop_procs,
+                                rate_filter_min, rate_filter_max, rate_filter_avg,
+                                rate_filter_med, rate_filter_proc       )
+		values	(	datetime(current_timestamp,'localtime'),
+				1,
+                                '$ratecmd',
+                                '$records',
+                                '$loop_min',    '$loop_max',    '$loop_avg',
+                                '$loop_med',    '$loop_procs',
+                                '$filter_min',  '$filter_max',  '$filter_avg',
+                                '$filter_med',  '$filter_procs' )
+                ;"
+        punchDB sql_parms
+}
+
+
+report_stats_looprates() {
+local funtag="[${FUNCNAME[0]}]"
+local	ratecmd="Looprate"
+local	record modname
+local	records loop_min loop_max loop_avg loop_med
+
+	for modname in $REPORT_MODULES
+	do 
+		record=$(fetch_rate_record $ratecmd $modname)
+		echo $funtag 
+		# echo "$record"	# DEBUG
+
+		# Get relevant values from record (directly for Looprate)
+		records=$(	grep '^Records'	<<< $record | awk '{print $2}')
+		loop_min=$(	grep '^Min'	<<< $record | awk '{print $3}')
+		loop_max=$(	grep '^Max'	<<< $record | awk '{print $3}')
+		loop_avg=$(	grep '^Avg'	<<< $record | awk '{print $3}')
+		loop_med=$(	grep '^Median'	<<< $record | awk '{print $3}')
+
+		if [ -n "$_DEBUG" ]
+		then	
+			echo $funtag $ratecmd $modname
+			echo "Records  : $records"
+			echo "Loop min : $loop_min"
+			echo "Loop max : $loop_max"
+			echo "Loop avg : $loop_avg"
+			echo "Loop med : $loop_med"
+		fi
+	done
+
+
+        sql_parms=()
+        sql_parms[cmd]="
+                insert into rates_stats
+                        (       event_stamp,
+				active,
+                                origin,
+                                records,
+                                rate_loop_min,	 rate_loop_max,	  rate_loop_avg,
+                                rate_loop_med,	 rate_loop_procs,
+                                rate_filter_min, rate_filter_max, rate_filter_avg,
+                                rate_filter_med, rate_filter_proc       )
+		values	(	datetime(current_timestamp,'localtime'),
+				1,
+                                '$ratecmd',
+                                '$records',
+                                '$loop_min',    '$loop_max',    '$loop_avg',
+                                '$loop_med',    '$loop_procs',
+                                '$filter_min',  '$filter_max',  '$filter_avg',
+                                '$filter_med',  '$filter_procs'		)
+                ;"
+        punchDB sql_parms
+}
+
+report_stats_common() {
+local funtag="[${FUNCNAME[0]}]"
+
+	$STATS_SQL "update stats_summary set event_stamp = datetime(current_timestamp,'localtime');"
+}
+
+fetch_rate_record() {
+local funtag="[${FUNCNAME[0]}]"
+local	ratecmd=$1
+local	modname=$2
+local	record
+
+	record=$($ratecmd $modname)
+	echo "$record"	# Data return, don't comment!
+}
+
+# vim: set filetype=sh noexpandtab tabstop=8 shiftwidth=8 autoindent smartindent :

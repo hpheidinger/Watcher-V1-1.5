@@ -1,0 +1,68 @@
+#!/bin/bash
+#–––––––––––––––––––––––––––––––– Preamble –––––––––––––––––––––––––
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+
+############################################################
+# - Watcher-Report Rev. 3 -
+# - Consolidated Watcher-Report -
+############################################################
+#--- Mandatory ----------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../system.conf
+. ../watchermap.conf
+. ../common.conf
+. ../common.bashlib
+#--- Private stuff ------
+. ../conf/private/$ME.conf
+#–––––––––––––––––––––––––––––––– Preamble END ––––––––––––––––––––––
+
+# No longer local functions here. Coming from API now
+# Configuration and private stuff outsourced whereever possible
+
+usage() {
+	echo "Usage ..."
+	echo "
+	$ME reports the quantitative state of DROPs in the
+	firewall if called with no parameters.
+
+	If called with '-e' the counters of dropped packets
+	in all IPSETs, that have packet DROPs are dumped and
+       	the efficiency is calculated. (qualitative view)
+	"
+	exit
+}	
+
+#–––––––––––––––––––– Main ––––––––––––––––––––––––––––––––––––––––––
+REPORTTYPE=stock		# Set some default
+REPORTMODE=stockview
+while getopts "?heSs:" opts
+do
+	case $opts in
+		'e')		# dropped-packets 
+				REPORTTYPE=efficiency
+				REPORTMODE=efficiency
+		;;
+		's')		# view specific statistics
+				REPORTTYPE=efficiency
+				REPORTMODE=statsview
+				REPORTFACT=$OPTARG
+				if [[ REPORTFACT == "" ]]
+				then REPORTFACT="_all_"
+				fi
+		;;
+		'S')		# Stats build and exit
+				REPORTTYPE=efficiency
+				REPORTMODE=stats
+		;;
+		'?'|'h')	usage
+	;;
+	esac
+done
+
+. ../api/bash/$ME-$REPORTTYPE.bashlib
+report_$REPORTTYPE $REPORTMODE

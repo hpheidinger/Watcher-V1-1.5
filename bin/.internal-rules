@@ -1,0 +1,55 @@
+# ------ Internal Rule set --------------
+# Used by WatchLG/MX/WB
+# MB module does not need it
+	#
+	# Kick junk off ...
+	#
+	# Must come FIRST of all
+	RULE=Superfluous
+		SUPER=`grep -oE "$SUPERFLUOUS" <<< $REPLY`
+		if [ ! -z "$SUPER" ]
+		then	: echo "Superfluous stuff ... ignored ..."
+			continue
+		fi
+
+	RULE=Freehost
+		if [[ "$REPLY" =~ "@Freehost:" ]]
+		then
+			DEL_ADDR=`get_bandit`
+			trace "$ME/$RULE Deleting $DEL_ADDR from $TABLE"
+			freehost $DEL_ADDR
+
+			#LOOP_END=`date +%s%3N`
+			#LOOP_TIME=$(( LOOP_END-LOOP_START ))
+			# trace  "$ME/$RULE $DEL_ADDR, Loop: $loop, $LOOP_TIME ms"
+			continue
+		fi
+
+       	RULE=Self
+		if [[ "$REPLY" =~ "$THIS_IP" ]]
+		then    trace "$ME/$RULE Oops ... me $THIS_IP"
+			continue
+		fi
+		
+       	RULE=DynIP
+		if [[ "$REPLY" =~ "$DYN_ADDR" ]]
+		then    trace "$ME/$RULE Oops ... my dyn IP $DYN_ADDR"
+			continue
+		fi
+
+	# Careful here $TRUSTED is a list of IP addresses
+       	RULE=Trusted
+		GOTCHA=
+		for t in $TRUSTED
+		do
+			if [[ "$REPLY" =~ "$t" ]]
+			then GOTCHA=continue; break
+			fi
+		done
+
+		if [ ! -z "$GOTCHA" ]
+		then    trace "$ME/$RULE Oops ... $t in trusted hosts ... skipping"
+			continue
+		fi
+
+# --------------------------------------	

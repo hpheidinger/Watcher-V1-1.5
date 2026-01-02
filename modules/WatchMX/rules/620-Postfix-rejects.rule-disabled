@@ -1,0 +1,5 @@
+RULE=Postfix-reject
+Pattern=': reject: header'
+#-------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 5; return $?; fi
+

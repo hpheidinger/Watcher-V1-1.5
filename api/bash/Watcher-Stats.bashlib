@@ -1,0 +1,381 @@
+# - Watcher-Stats.bashlib -
+. Watcher-Stats-helper.bashlib
+
+### Globals
+MODULES='lg mb mx wb geo'
+STAT_DB=$MASTER_PATH/$ME.db
+POOL_DB=$POOL/Watcher-Report3.db
+STAT_SQL="sqlite3 -csv $STAT_DB"
+POOL_SQL="sqlite3 -csv $POOL_DB"
+
+declare -A	DBs
+		DBs[STAT]=$STAT_DB
+		DBs[POOL]=$POOL_DB
+
+declare -A	sql_parms
+declare -A	sql_result
+
+# Watcher-Stats API main wrapper
+# Rope ladder for the tasks to do
+report_stats() {
+local funtag="[${FUNCNAME[0]}]"
+
+	statistics_efficiency
+	statistics_procrate
+	statistics_sqlrate
+	statistics_looprate
+
+	# ... and anything else
+	report_raw
+	report_filter
+#	report_types
+	
+}
+
+statistics_efficiency() {
+local funtag="[${FUNCNAME[0]}]"
+local	kind="Efficiency"
+
+	sql_parms=()
+	sql_parms[cmd]="
+		select	event_stamp,
+			origin,
+			active,
+			eff_cur,
+			eff_min,
+			eff_max
+		from efficiency_stats
+		where active = 1
+		;"
+
+	procsql sql_parms STAT
+	funrc=$?		# return code from function
+
+	#dump_map sql_parms	# see what the function returned	DEBUG
+	#dump_map sql_result	# see what SQL 		returned	DEBUG
+
+	# Provided procsql() function returned no error
+	if [[ $funrc -eq 0 ]] && [[ ${sql_parms[cmdtype]} == 'SELECT' ]]
+	then	
+		if [[ ${sqk_result[sqlrc]} -eq 0 ]]	# no error in SQL
+		then	dump_csv sql_result $kind
+		fi
+	fi
+}
+
+
+statistics_procrate() {
+local funtag="[${FUNCNAME[0]}]"
+local	cmd="Procrate"
+local	kind=$cmd
+local	records
+local	report line
+
+	for m in $MODULES
+	do
+		report="$($cmd $m)"
+
+		# Records extrahieren
+		records=$(awk '/Records:/ {print $2}' <<< "$report")
+
+		# Reset der Variablen
+		unset loop_min   loop_max   loop_avg   loop_med   loop_pro
+		unset filter_min filter_max filter_avg filter_med filter_pro
+
+		# Walk over all lines
+		while read -r line
+		do
+			if [[ $line == Loop:* ]]
+			then
+				read _ loop_min loop_max loop_avg loop_med loop_pro <<< "$line"
+				loop_min=${loop_min/ms/}
+				loop_max=${loop_max/ms/}
+				loop_avg=${loop_avg/ms/}
+				loop_med=${loop_med/ms/}
+
+			elif [[ $line == Filter:* ]]
+			then
+				read _ filter_min filter_max filter_avg filter_med filter_pro <<< "$line"
+				filter_min=${filter_min/ms/}
+				filter_max=${filter_max/ms/}
+				filter_avg=${filter_avg/ms/}
+				filter_med=${filter_med/ms/}
+			fi
+		done <<< "$report"
+
+		# Prepare SQL
+		sql_parms=()
+		sql_parms[cmd]="
+			insert into rates_stats (
+				event_stamp,
+				origin,
+				module,
+				active,
+				records,
+				rate_loop_min,	rate_loop_max,	rate_loop_avg,	rate_loop_med,	rate_loop_procs,
+				rate_filter_min, rate_filter_max, rate_filter_avg, rate_filter_med, rate_filter_proc
+			)
+			values (
+				datetime(current_timestamp,'localtime'),
+				'$cmd',
+				'$m',
+				1,
+				$records,
+				$loop_min, $loop_max, $loop_avg, $loop_med, $loop_pro,
+				$filter_min, $filter_max, $filter_avg, $filter_med, $filter_pro
+			);
+			"
+		procsql sql_parms STAT
+	done
+
+	sql_parms=()
+	sql_parms[cmd]="
+		select * from rates_stats
+			where origin = '$cmd'
+			  and active = 1
+		;"
+
+	procsql sql_parms STAT
+	funrc=$?		# return code from function
+
+	#dump_map sql_parms	# see what the function returned	DEBUG
+	#dump_map sql_result	# see what SQL 		returned	DEBUG
+
+	# Provided procsql() function returned no error
+	if [[ $funrc -eq 0 ]] && [[ ${sql_parms[cmdtype]} == 'SELECT' ]]
+	then	
+		if [[ ${sqk_result[sqlrc]} -eq 0 ]]	# no error in SQL
+		then	dump_csv sql_result $kind
+		fi
+	fi
+}
+
+
+statistics_looprate() {
+local funtag="[${FUNCNAME[0]}]"
+local	cmd="Looprate"
+local	kind=$cmd
+local	records
+local	m report stats
+local	min max avg med std
+
+	for m in $MODULES
+	do
+		report=$($cmd $m)
+		records=$(grep '^Records:'	<<< "$report" | awk '{print $2}')
+
+		stats=$(grep -A5 "Statistics:"	<<< "$report")
+		min=$(	  grep '^Min'		<<< "$stats" | awk '/.*(ms)$/ 	{print $(NF-1)}')
+		max=$(	  grep '^Max'		<<< "$stats" | awk '/.*(ms)$/	{print $(NF-1)}')
+		avg=$(	  grep '^Avg'		<<< "$stats" | awk '/.*(ms)$/	{print $(NF-1)}')
+		med=$(	  grep '^Median' 	<<< "$stats" | awk '/.*(ms)$/	{print $(NF-1)}')
+		std=$(	  grep '^Std'	 	<<< "$stats" | awk '/.*(ms)$/	{print $(NF-1)}')
+
+		: echo "Min	: $min"
+		: echo "Max	: $max"
+		: echo "Avg	: $avg"
+		: echo "Median	: $med"
+		: echo "Std Dev	: $std"
+
+		# Prepare SQL
+		sql_parms=()
+		sql_parms[cmd]="
+			insert into looprates_stats (
+				event_stamp,
+				origin,
+				module,
+				active,
+				records,
+				loop_min, loop_max, loop_avg, loop_med, loop_std
+			)
+			values (
+				datetime(current_timestamp,'localtime'),
+				'$cmd',
+				'$m',
+				1,
+				$records,
+				$min, $max, $avg, $med, $std
+			);
+			"
+		
+		procsql sql_parms STAT
+	done
+
+	sql_parms=()
+	sql_parms[cmd]="
+		select * from looprates_stats
+			where origin = '$cmd'
+			  and active = 1
+		;"
+
+	procsql sql_parms STAT
+	funrc=$?		# return code from function
+
+	#dump_map sql_parms	# see what the function returned	DEBUG
+	#dump_map sql_result	# see what SQL 		returned	DEBUG
+
+	# Provided procsql() function returned no error
+	if [[ $funrc -eq 0 ]] && [[ ${sql_parms[cmdtype]} == 'SELECT' ]]
+	then	
+		if [[ ${sqk_result[sqlrc]} -eq 0 ]]	# no error in SQL
+		then	dump_csv sql_result $kind
+		fi
+	fi
+}
+
+# Sqlrate has no 'filter:' stage - just 'Loop:'
+statistics_sqlrate() {
+local funtag="[${FUNCNAME[0]}]"
+local	cmd="Sqlrate"
+local	kind=$cmd
+local	records
+local	report line
+
+	for m in $MODULES
+	do
+		report="$($cmd $m)"
+
+		# Records extrahieren
+		records=$(awk '/Records:/ {print $2}' <<< "$report")
+
+		# Reset der Variablen
+		unset loop_min   loop_max   loop_avg   loop_med   loop_pro
+		unset filter_min filter_max filter_avg filter_med filter_pro
+
+		# Walk over all lines
+		while read -r line
+		do
+			if [[ $line == Loop:* ]]
+			then
+				read _ loop_min loop_max loop_avg loop_med loop_pro <<< "$line"
+				loop_min=${loop_min/ms/}
+				loop_max=${loop_max/ms/}
+				loop_avg=${loop_avg/ms/}
+				loop_med=${loop_med/ms/}
+
+			fi
+		done <<< "$report"
+
+		# Prepare SQL insert
+		sql_parms=()
+		sql_parms[cmd]="
+			insert into rates_stats (
+				event_stamp,
+				origin,
+				module,
+				active,
+				records,
+				rate_loop_min,	rate_loop_max,	rate_loop_avg,	rate_loop_med,	rate_loop_procs,
+				rate_filter_min, rate_filter_max, rate_filter_avg, rate_filter_med, rate_filter_proc
+			)
+			values (
+				datetime(current_timestamp,'localtime'),
+				'$cmd',
+				'$m',
+				1,
+				$records,
+				$loop_min, $loop_max, $loop_avg, $loop_med, $loop_pro,
+				'NA','NA','NA','NA','NA'	-- No Filter block in 'sqlrates'
+			);
+			"
+		procsql sql_parms STAT
+	done
+
+	sql_parms=()
+	sql_parms[cmd]="
+		select * from rates_stats
+			where origin = '$cmd'
+			  and active = 1
+		;"
+
+	procsql sql_parms STAT
+	funrc=$?		# return code from function
+
+	#dump_map sql_parms	# see what the function returned	DEBUG
+	#dump_map sql_result	# see what SQL 		returned	DEBUG
+
+	# Provided procsql() function returned no error
+	if [[ $funrc -eq 0 ]] && [[ ${sql_parms[cmdtype]} == 'SELECT' ]]
+	then	
+		if [[ ${sqk_result[sqlrc]} -eq 0 ]]	# no error in SQL
+		then	dump_csv sql_result $kind
+		fi
+	fi
+}
+
+# 
+# Report functions ... for testing ...
+#
+report_raw() {
+local funtag="[${FUNCNAME[0]}]"
+local	kind=$(echo $funtag| tr -d '[]')
+local	funrc
+
+	# echo $funtag >&2
+
+	sql_parms=()
+	sql_parms[cmd]="
+		select ipset, chain, target, osi, member, membertype, packets 
+			from ipsets
+			where osi	= 3
+			  and target	= 'DROP'
+			  and packets	!= 0
+		;"
+	
+	procsql sql_parms POOL
+	funrc=$?		# return code from function
+
+	#dump_map sql_parms	# see what the function returned	DEBUG
+	#dump_map sql_result	# see what SQL 		returned	DEBUG
+
+	# Provided procsql() function returned no error
+	if [[ $funrc -eq 0 ]] && [[ ${sql_parms[cmdtype]} == 'SELECT' ]]
+	then	
+		if [[ ${sqk_result[sqlrc]} -eq 0 ]]	# no error in SQL
+		then	dump_csv sql_result $kind
+		fi
+	fi
+}
+
+report_filter() {
+local funtag="[${FUNCNAME[0]}]"
+local	kind=$(echo $funtag| tr -d '[]')
+local	funrc
+
+	# echo $funtag >&2
+
+	sql_parms=()
+	sql_parms[cmd]="
+		select ipset, chain, target, osi, member, membertype, packets 
+			from ipsets
+			where osi	= 5
+			  and target	= 'DROP'
+			  and packets	!= 0
+		;"
+	
+	procsql sql_parms POOL
+	funrc=$?		# return code from function
+
+	#dump_map sql_parms	# see what the function returned	DEBUG
+	#dump_map sql_result	# see what SQL 		returned	DEBUG
+
+	# Provided procsql() function returned no error
+	if [[ $funrc -eq 0 ]] && [[ ${sql_parms[cmdtype]} == 'SELECT' ]]
+	then	
+		if [[ ${sqk_result[sqlrc]} -eq 0 ]]	# no error in SQL
+		then	dump_csv sql_result $kind
+		fi
+	fi
+}
+
+report_types () {
+local funtag="[${FUNCNAME[0]}]"
+local	types="Login Mail Mailbox Web WBanalyse"
+
+	echo "[ Members in firewall ]" 
+	for t in $types
+	do printf "%10s: %9d\n" "$t" $(count-by-type $t)
+	done
+}
+
+# vim: set filetype=sh noexpandtab tabstop=8 shiftwidth=8 autoindent smartindent :

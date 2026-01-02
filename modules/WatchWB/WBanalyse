@@ -1,0 +1,165 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then			_TRACE=$1; shift; fi
+####################################################################
+#
+# - WBanalyse -
+# (experimental)
+#
+#--------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../../system.conf
+. ../../watchermap.conf
+. ../../common.conf
+. ../../common.bashlib
+#--------------------------
+. WatchWB.conf
+. private.bashlib
+
+trap	cleanup	0 1 2 9 15
+
+cleanup() {
+: rm -f $ME.tmp
+}
+
+all_hterrs() {
+local   all_unt=$(Untreated wb)
+        ERRLIST=$(
+        awk '
+        match($0, /"[^"]*" ([0-9]{3})/, m) {
+                code = m[1]
+                errcodes[code]++
+        }
+        END {
+                for (e in errcodes)
+                        printf "%s %d\n", e, errcodes[e]
+        }
+        ' <<< "$all_unt" | sort -n
+        )
+}
+
+
+all_hterrs
+#echo "$ERRLIST"
+
+
+LOADFILE="$POOL/ipset.Loadfile-$ME"
+MYSET=Untreated
+SET_TYPE='hash:net'
+TIMEOUT=$((3600 * 6))
+SET_OPTS="comment counters timeout $TIMEOUT"
+
+
+if ! ipset -n l | grep -q $MYSET
+then
+	# Don't put in '_lowlevel' - it has no whitelist!
+	mk-ipset  "$MYSET" "$SET_TYPE" "$SET_OPTS"
+fi
+
+# Prevent 'self-lockout'
+read DYN_IP </var/log/DYN_IP
+
+Untreated wb |\
+awk 	-v Me=$ME 		\
+	-v DYN_IP="$DYN_IP"	'
+BEGIN {
+	# Devel. note: See /root/bin/Test/IPmatch
+	IP4PAT="([1-9]{1}[0-9]{0,2}[.]{1}){1}((0{1}[.])|([1-9]{1}[0-9]{0,2}[.])){2}((0{1})|([1-9]{1}[0-9]{0,2})){1}([\\] ]|[\\} ]|[\\) ]|[\\047 ]|[\\042 ]|[ ])+"
+}
+match($0,IP4PAT) {
+			trail=substr($0,RSTART,RLENGTH)
+			gsub(/[\[\]\{\}\(\)\047\042 ]/,"",trail)
+			bandit=trail
+
+			# Prevent 'self-lockout'
+			if ( bandit == DYN_IP ) { next }
+
+			#print "------------ "bandit" ----------------"
+			# Condense IPs to uniquenes
+			bandits[bandit]=bandit
+		}
+/( 404 )/	{
+			# Try to match GET
+			if ( match($0, /\042GET (.* )/, tmp) && tmp[1] != "" ) {
+				split(tmp[1], parts)
+				str = parts[1]
+				gets[str] = bandit " GET " str
+			}
+
+			# Try to match POST
+			if ( match($0, /\042POST (.* )/, tmp) && tmp[1] != "" ) {
+				split(tmp[1], parts)
+				str = parts[1]
+				posts[str] = bandit " POST " str
+			}
+		}
+END	{
+			for (g in gets)	 	{ 
+				print gets[g] > Me".gets" 
+				print gets[g]
+			}
+
+			for (p in posts) 	{
+				print posts[p] > Me".posts" 
+				print posts[p]
+			}
+
+			count=0
+			for (b in bandits) {
+				count++
+				printf "Bandit: %s\n", b > Me".bandits"
+			}
+			print "Total bandits:",count
+}
+'  | sort | uniq > $ME.tmp
+
+
+# Determine IPs of whitebots
+whiteIPs=$(ipset l passthru | grep  '^[1-9]' | awk '{ print $1}')
+#echo $whiteIPs
+
+whiteIPsPattern=$(echo "$whiteIPs" | paste -sd'|' -)
+
+awk	-v loadfile=$LOADFILE			\
+	-v myset="$MYSET"			\
+	-v set_type="$SET_TYPE"			\
+	-v set_opts="$SET_OPTS"			\
+	-v timeout="$TIMEOUT"			\
+	-v pattern="$whiteIPsPattern"		\
+	-v Me=$ME 				'
+/Bandit:/	{
+			ip = $2
+			if (ip ~ ("^(" pattern ")$")) {
+				# Skip whitelisted bots ...
+				printf "Skipped whitebot: %-20s\n", ip
+				next
+			}
+
+			drops[ip]=ip
+		}
+END		{
+		#	printf "create -exist %s %s %s\n", myset, set_type, set_opts > loadfile
+			comment = "Untreated,"Me",404"
+			for (d in drops) {
+				printf "add %s %s timeout %d comment %s\n", myset, d, timeout, comment > loadfile
+				print drops[d] > Me".drops"
+			}
+}
+' "$ME.bandits"
+
+ipset flush $MYSET
+ipset -file $LOADFILE restore
+
+
+result=$?
+
+if [ $result -eq 0 ]
+then logger "$ME finished successfully"
+else logger "$ME failed restoring $LOADFILE"
+fi
+
+Whitelist	# force 'whitelist' being on top

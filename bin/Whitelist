@@ -1,0 +1,102 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+############################################################
+# - Whitelist, Master -
+# Run this manually after changes 
+# or from crontab with a short cycle; e.g. 5 minutes
+############################################################
+#-------[ Preamble ] ---------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+#---  Mandatory stuff ----
+. ../system.conf
+. ../watchermap.conf
+. ../common.conf
+. ../common.bashlib
+#---  Private stuff ------
+. ../conf/private/$ME.conf
+#-------[ Preamble; End ] ----------
+
+#
+# Drop ipset ''whitelist' from a chains
+# $1	the affected table (raw, filter, ..)
+# $2	the chain name; defaults to 'INPUT'
+drop_whitelist() {
+local funtag="[${FUNCNAME[0]}]"
+local	table=${1:-filter}
+local	chain=${2:-INPUT}
+local   position
+
+	: echo "$ME/$funtag"
+
+	# Delete all occurences of 'whitelist' from the given chain
+	while :;
+	do
+		position=`$IPTABLES -t $table -vnL $chain --line-numbers | grep "match-set whitelist" | awk '{print $1}' | head -n 1`
+		if [ -z "$position" ]
+		then break
+		else $IPTABLES -t $table -D $chain $position
+		fi
+	done
+}
+
+# Create a common 'whitelist' IPSET as bypass
+ipset -exist create $MYSET $SETTYP $SETOPTS
+
+#
+# Fill in local whitelist into relevant tables
+#
+for t in $TABLES	# Affected tables defined in private *.conf file
+do
+	case $t in
+		raw|mangle)	CHAINS="PREROUTING"
+		;;
+		filter)		CHAINS="INPUT FORWARD"
+	;;
+	esac
+
+	# Assure we are on-top of any chain
+	for c in $CHAINS
+	do drop_whitelist $t $c
+	done
+
+	if ! $IPTABLES -t $t -nL $chain | grep "match-set whitelist" | grep -q ACCEPT
+	then
+		for c in $CHAINS
+		do $IPTABLES -t $t -I $c -m set --match-set whitelist src -j ACCEPT
+		done	
+	fi
+done # TABLES	
+
+if [ -f $MASTER_PATH/whitelist ]
+then
+	for list in whitelist
+	do
+		awk 	-v setname=$MYSET	\
+			-v settype="$SETTYP"	\
+			-v setopts="$SETOPTS"	\
+			-v loadfile="$LOADFILE" ' 
+		/^$/            { next }
+		/^[ \t]*[#]/    { next }
+				{ IP[$1]=$1 }
+		END {
+			printf "-exist create %s %s %s\n", setname, settype, setopts > loadfile
+
+			for ( ip in IP ) {
+				printf "add %s %s comment whitelisted\n", setname, ip > loadfile
+			}
+		}
+		' $MASTER_PATH/$list
+
+		$IPSET flush $MYSET
+		$IPSET -quiet -file $LOADFILE restore
+	done
+
+	logger	 "$ME[$$] Loaded whitelist from 'whitelist' file in $MASTER_PATH ..."
+else	echo 	 "$ME: No 'whitelist' file in $MASTER_PATH ..."
+fi

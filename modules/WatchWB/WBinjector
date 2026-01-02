@@ -1,0 +1,77 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+#
+# Inject an immediate manual DROP into the database & firewall ...
+#
+# We get:
+# $1	... IP address
+# $2	... optinal tag
+#--------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../../system.conf
+. ../../common.conf
+. ../../common.bashlib
+#--------------------------
+. WatchWB.conf
+
+DBInject() {
+local	comment="$2"
+local	haveit
+
+	CLASS=`get_class $1`
+	haveit=`$SQL "select IP from webhogs where IP='$1';"` 
+
+	if [ -z "$haveit" ]
+	then
+		$SQL "insert into $TABLE (affairs,IP,type,class,web_class,state,severity,date_intro,date_event,comment)
+		values ($MAX_AFFAIRS,'$1','$THIS_TYPE','$CLASS','Manual','DROP','Banned',
+			datetime(current_timestamp,'localtime'),
+			datetime(current_timestamp,'localtime'),
+			'$comment');"
+	else
+		$SQL "update $TABLE set affairs=99, class='$CLASS', web_class='Manual',
+			type='$THIS_TYPE', state='DROP', severity='Banned',
+			date_intro=datetime(current_timestamp,'localtime'),
+			date_event=datetime(current_timestamp,'localtime') 
+			where IP='$1';"
+	fi
+}
+
+IntoFW() {
+local	comment="Manual inject,$2"
+
+	if $IPSET -q test $MYSET $1
+	then return
+	fi
+
+	DBInject "$1" "$comment"
+	$IPSET -exist add custody $1 comment "custody,$comment"
+}
+
+
+#------------ Main ---------------
+if [ -z "$2" ]
+then TAG="Manual"
+else TAG="$2"
+fi
+
+if [ -z "$1" ]
+then
+	echo "Usage: $ME IP_addr tag"
+else
+	# User input !! Check plausibility
+	# Is it a legal IP address?
+	validate_IP $1
+	if [ $? -ne 0 ]
+	then 	echo "Illegal IP address '$1' ... exiting"
+		exit
+	fi
+
+	IntoFW "$1" "$TAG"
+fi

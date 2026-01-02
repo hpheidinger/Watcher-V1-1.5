@@ -1,0 +1,6 @@
+RULE=FakeHost
+Pattern='does not resolve to address'
+#--------------	
+#if [[ "$REPLY" =~ "$Pattern" ]]; then CLASS=FAKEHOST; inject 5; return $?; fi
+if [[ "$REPLY" =~ "$Pattern" ]]; then CLASS=FAKEHOST; kickoff; return $?; fi
+

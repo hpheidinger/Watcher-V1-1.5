@@ -1,0 +1,171 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+############################################################
+# - tidyDB - Development version
+#
+# Tidy up a production DB with a fresh rendition generated
+# from recent Schema.sql
+# 
+############################################################
+#------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+#. ../system.conf
+#. ../watchermap.conf
+#. ../common.conf
+#. ../common.bashlib
+BASE=`Masterpath`
+. $BASE/system.conf
+. $BASE/watchermap.conf
+. $BASE/common.conf
+. $BASE/common.bashlib
+#--- Private stuff ------
+# e.g.	private.bashlib		for modules & dynloaders
+# or	../api/bash/$ME.bashlib for Watcher tools
+
+trap cleanup 0 1 2 9 15
+
+cleanup() {
+: 
+	# echo "Cleaning up intermediate file..."
+	#if [ -e $INTERMEDIATE ]; then rm "$INTERMEDIATE"; fi
+}
+
+# Fix intermediate file
+# i.e. add missing coloums to tables found in the NEW 'Schema.sql'
+# but not yet in the intermediate DB
+fix_inter() {
+local funtag="[${FUNCNAME[0]}]"
+
+	echo ">>$funtag"
+    echo "Checking and adding missing columns in the intermediate database..."
+    
+    for TABLE in $(sqlite3 "$INTERMEDIATE" ".tables")
+    do
+        echo "Processing table: $TABLE"
+        
+        # Hole existierende Spalten in der Intermediate-DB
+        COLUMNS_OLD=$(sqlite3 "$INTERMEDIATE" "PRAGMA table_info($TABLE);" | awk -F'|' '{print $2 "|" $3}')
+        
+        # Hole Spalten aus Schema.sql mit Typen
+        COLUMNS_NEW=$(awk -v table="$TABLE" '
+            BEGIN { capture=0; }
+	    /^$/		{ next } 	# Suppres blank lines	
+            /^CREATE TABLE/ 	{ if ($0 ~ table) capture=1; next }
+            capture && /\);/ 	{ capture=0; next }
+            capture 		{ 
+                match($0, /^[ \t]*([a-zA-Z0-9_]+)[ \t]+([a-zA-Z0-9\(\)]+)/, arr)
+                if (arr[1] && arr[2]) print arr[1] "|" arr[2];
+            }
+        ' Schema.sql)
+        
+	# Füge fehlende Spalten hinzu, aber nur wenn COLUMNS_NEW nicht leer ist
+	if [ -n "$COLUMNS_NEW" ]; then
+	    while IFS="|" read -r COL TYPE; do
+		if [ -n "$COL" ] && [ -n "$TYPE" ]; then
+		    if ! echo "$COLUMNS_OLD" | grep -q "^$COL|"; then
+			echo "Adding missing column '$COL' (type: $TYPE) to table '$TABLE' in intermediate database..."
+			sqlite3 "$INTERMEDIATE" "ALTER TABLE $TABLE ADD COLUMN $COL $TYPE;"
+		    fi
+		fi
+	    done <<< "$COLUMNS_NEW"
+	fi
+    done
+}
+
+###
+shuffle() {
+local funtag="[${FUNCNAME[0]}]"
+local TABLE
+local SOURCE_DB=$1
+local NEW_DB=$2
+local TABLES=$(sqlite3 "$NEW_DB" "SELECT name FROM sqlite_master WHERE type='table';")
+
+	echo ">>$funtag  $1 ––→ $2"
+    for TABLE in $TABLES; do
+        if [[ "$TABLE" != "config" ]]; then
+            echo "Verarbeite Tabelle: $TABLE"
+
+            TABLE_EXISTS=$(sqlite3 "$SOURCE_DB" "SELECT name FROM sqlite_master WHERE type='table' AND name='$TABLE';")
+            if [[ -n "$TABLE_EXISTS" ]]; then
+                echo "Übertrage Daten von Tabelle '$TABLE' mit neuer Spaltenreihenfolge..."
+
+                # Exakte Spaltenreihenfolge aus der neuen DB holen
+                COLUMNS=$(sqlite3 "$NEW_DB" "PRAGMA table_info($TABLE);" | awk -F'|' '{print $2}' | paste -sd, -)
+
+                sqlite3 "$NEW_DB" <<-EOF
+		ATTACH DATABASE '$SOURCE_DB' AS old_db;
+
+		INSERT INTO $TABLE ($COLUMNS)
+		SELECT $COLUMNS FROM old_db.$TABLE;
+
+		DETACH DATABASE old_db;
+		EOF
+                echo "Daten von Tabelle '$TABLE' erfolgreich übertragen!"
+            else
+                echo "WARNUNG: Tabelle '$TABLE' existiert nicht in der alten DB. Überspringe."
+            fi
+        else
+            echo "WARNUNG: Tabelle '$TABLE' (config) wird übersprungen."
+        fi
+    done
+}
+
+
+# Check if database name was provided
+if [ -z "$1" ]
+then
+	echo "Usage: tidyDB <dbname>"
+	exit 1
+else	DBNAME=$1	
+fi
+
+# Set DBFILE once and for all
+DBFILE=$DBNAME.db 
+
+### Internal configuration
+TIMESTAMP=$(date +%Y-%m-%dT%H:%M:%S)
+
+# Workfiles ...
+BACKUP="$DBFILE-$TIMESTAMP"
+INTERMEDIATE="$DBFILE-inter"
+NEW_DB="$DBFILE-new"
+### End: Internal configuration
+
+# -------- Main -----------------
+# Move original DB to the backup (this way we never overwrite it!)
+echo "Creating backup: $BACKUP"
+mv "$DBFILE" "$BACKUP"
+
+# Create an intermediate working copy
+echo "Creating intermediate database: $INTERMEDIATE"
+#cp "$BACKUP" "$INTERMEDIATE"
+sqlite3 "$BACKUP" ".clone $INTERMEDIATE"
+
+# Create a new empty database from the schema
+echo "Creating new database with schema: $NEW_DB"
+sqlite3 "$NEW_DB" < Schema.sql
+
+fix_inter	# Adjust the intermediate DB where needed
+
+# Transfer data from the intermediate DB to the new DB
+echo "Transferring data from intermediate DB to new DB..."
+#sqlite3 "$INTERMEDIATE" .dump | sqlite3 "$NEW_DB" ### Junk!!!
+shuffle $INTERMEDIATE $NEW_DB
+
+# Replace the original database with the new one
+#echo "Replacing original database with new version..."
+#mv "$NEW_DB" "$DBFILE"
+echo "»» Stop 'watcher'"
+echo "»» then 'mv $NEW_DB $DBFILE'"
+echo "»» and reload watcher"
+echo "»» i.e.	'service watcher reload'"
+echo "»» or 	'systemctl reload watcher'"
+
+echo "Database migration completed successfully!"
+exit

@@ -1,0 +1,4 @@
+#!/bin/bash
+for r in `echo *.rule`
+do ./check-rule $r
+done

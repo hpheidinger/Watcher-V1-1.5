@@ -1,0 +1,43 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+# - Prep - WB module
+#------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+#------------------------
+. WatchWB.conf
+
+#
+# Check if we have sqlite3 on the system
+#
+SQLITE3=`which sqlite3`
+
+if [ -z $SQLITE3 ]
+then
+	echo "No 'sqlite3' found on the system"
+	echo "Module $ME needs sqlite3 to maintain its database"
+	echo "Install 'sqlite3' for your system and start $ME again"
+	echo "Exiting ..."
+	exit
+fi
+
+if [ -f $DB ]
+then
+	echo "CAUTION:"
+	echo "Database '$DB' already exists."
+	echo "If you really want to start-over with a blank database"
+	echo "remove the database manualy. (rm $DB)"
+	echo "Then start ./$ME again"
+	echo "Exiting ..."
+	exit
+else
+	$SQL < Schema.sql
+	$SQL < Views.sql
+	echo "Database '$DB' initialized ..."
+	echo "Configure your WEB instances (sites) by using 'WBinstance'"
+fi

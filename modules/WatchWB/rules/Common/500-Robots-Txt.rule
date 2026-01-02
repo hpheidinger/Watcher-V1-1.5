@@ -1,0 +1,11 @@
+WEB_CLASS=Robots-Txt
+###############################
+# robots.txt only allowed for crawlers whitelisted by the 
+# whitebots_map
+# Requestors get a penalty of the configured MAX_AFFAIRS
+# which causes an immediate DROP
+RULE=Robots-Txt
+Pattern='GET /robots.txt' 
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 5; return $?; fi
+

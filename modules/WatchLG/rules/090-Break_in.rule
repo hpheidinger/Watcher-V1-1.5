@@ -1,0 +1,12 @@
+RULE="Bad-SSH-Nego"
+Pattern=': Unable to negotiate with'
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE="Bad-SSH-Prot"
+Pattern=': Bad protocol version identification'
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE="Read-SSH-ProtVers"
+Pattern=': could not read protocol version'
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+

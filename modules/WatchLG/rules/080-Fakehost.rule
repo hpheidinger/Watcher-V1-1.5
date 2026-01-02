@@ -1,0 +1,13 @@
+# - 080-Fakehost.rule -
+## Note that Pattern is not enclosed in double-quotes!
+# This one makes a real REGEX (not string) match
+RULE=Fakehost
+Pattern='reverse mapping checking getaddrinfo for .+ \[.+\] failed\.$'
+#---------------
+#if [[ "$REPLY" =~ $Pattern ]]; then inject 3; return $?; fi
+if [[ "$REPLY" =~ $Pattern ]]; then CLASS=FAKEHOST; kickoff; return $?; fi
+
+RULE=Fakehost2
+Pattern=', but this does not map back to the address.'
+if [[ "$REPLY" =~ "$Pattern" ]]; then CLASS=FAKEHOST; kickoff; return $?; fi
+

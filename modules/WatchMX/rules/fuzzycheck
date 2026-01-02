@@ -1,0 +1,9 @@
+#!/bin/bash
+
+Allpattern=`grep 'Pattern' *.rule | awk '{ split($0,part,"="); print "««"part[2] }'`
+
+for p in `echo "$Allpattern"`
+do
+	echo "»» $p"
+	agrep $p superfluous_map
+done

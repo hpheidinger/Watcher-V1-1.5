@@ -1,0 +1,207 @@
+# - Watcher-Stats-helper.bashlib -
+#+
+# Helper functions for Watcher-Stats
+#-
+
+expire_stats() {
+# $1	Number of days to keep	
+local funtag="[${FUNCNAME[0]}]"
+local	mode=STAT	# must be STAT anyway
+local	tables="efficiency_stats rates_stats"
+local	expdays
+local	success=0 failure msg
+local	errors=0
+
+	echo $funtag >&2
+
+	if [ -z "$1" ]
+	then expdays=$EXPIRATION_DAYS
+	else expdays=$1
+	fi
+
+	msg="Expiring Stats-DB to $expdays day(s)"
+	echo	"$msg" >&2
+	logger	"$msg"
+
+	for table in $tables
+	do	
+		sql_parms=()
+		sql_parms[cmd]="
+			delete from $table
+			where (julianday('now') - julianday(event_stamp)) > $expdays
+			;"
+		procsql sql_parms $mode
+
+		# Report success or failure
+		success=${sql_result[sqlrc]}
+
+		if [ $success -eq 0 ]
+		then	failure=" with no errors"
+		else	failure=" with errors"
+			((errors++))
+		fi
+
+		echo "Table $table expired $failure, ERC: $success"
+	done
+
+	msg="$ME/$funtag finished with $errors errors"
+	echo	"$msg" >&2
+	logger	"$msg"
+
+	sql_parms=()
+	sql_parms[cmd]="vacuum main;"
+	procsql sql_parms $mode
+}
+
+members-by-type() {
+# $1	type	
+local funtag="[${FUNCNAME[0]}]"
+
+	ipset list | grep '^[1-9]' | grep -i ",$1,"
+}
+
+count-by-type() {
+# $1	type	
+local funtag="[${FUNCNAME[0]}]"
+
+	members-by-type $1 | wc -l
+}
+
+
+# Find column widths in SQL data output
+col_widths() {
+local funtag="[${FUNCNAME[0]}]"
+local	-n cw_map="$1"
+#local	widths sepchar	# now in map
+local	this_widths
+
+	echo $funtag >&2
+	data="${cw_map[data]}"
+
+        this_widths=$(
+		awk -v sepchar="$sepchar" '
+		BEGIN { maxcols = 0 }	
+			{
+				cols = split($0, parts, sepchar)
+				if (cols > maxcols) maxcols = cols
+				for (i=1; i<=cols; i++) {
+					l = length(parts[i])
+					if (l > width[i]) width[i] = l
+				}
+			}
+		END {
+			out = ""
+			for (i=1; i<=maxcols; i++) {
+				out = out width[i] " "
+			}
+			print out
+		}
+		' <<< "$data"
+	)
+
+	cw_map[widths]="$this_widths"
+}
+
+
+make_format() {
+local funtag="[${FUNCNAME[0]}]"
+local	-n mf_map="$1"
+local	widths
+local	fmt=""
+local	w
+
+	echo $funtag >&2
+
+	widths="${mf_map[widths]}"
+
+        for w in $widths
+        do fmt="$fmt%-${w}s "
+        done
+
+	mf_map[format]="$fmt"
+}
+
+print_table() {
+local funtag="[${FUNCNAME[0]}]"
+local	-n pt_map="$1"
+local	data sepchar	# from caller map
+local	line fields
+local	this_widths this_format
+
+	echo $funtag >&2
+	data="${pt_map[data]}"
+	sepchar="${pt_map[sepchar]:-|}"
+
+	col_widths pt_map
+	make_format pt_map
+	
+	this_widths=${pt_map[widths]}
+	this_format=${pt_map[format]}
+
+	echo "Widths: '$this_widths'" >2&
+	echo "Format: '$this_format'" >2&
+
+        while IFS= read -r line
+        do      IFS="$sepchar" read -r -a fields <<< "$line"
+                printf "$this_format\n" "${fields[@]}"
+        done <<< "$data"
+}
+
+dump_csv() {
+# $1	a map with column names and data; i.e. sql_result 
+local funtag="[${FUNCNAME[0]}]"
+local	-n map="$1"
+local	kind="$2"
+local	header=
+local	output=
+local	csvfile
+local	this_head this_data
+local	this_csv
+
+	this_head=${map[header]}
+	this_data=${map[result]}
+	csvfile="$MASTER_PATH/$ME-$kind.csv"
+	
+	>$csvfile
+
+	# Read native SQlite header and make it CSV
+	header=$(
+		awk '
+			{
+				n = split ($0,parts,"|")
+				for ( i=1; i<n; i++ )	{
+					printf "\"%s\",", parts[i]
+				}
+				printf "\"%s\"", parts[i]
+			}	
+		' <<< "$this_head"
+	)
+
+	# Read native SQlite resultset (data) and make it CSV
+	output=$(
+		awk '
+			{
+				n = split ($0,parts,"|")
+				for ( i=1; i<n; i++ )	{
+					printf "\"%s\",", parts[i]
+				}
+				printf "\"%s\"", parts[i]
+				print ""
+			}	
+		' <<< "$this_data"
+	)
+
+	echo "$header" 	>> $csvfile
+	echo "$output"	>> $csvfile
+
+	if [ -n "$DOMAIL" ]
+	then
+		echo "Mailing '$csvfile' to $REPORTMAIL ..."
+		mail -s "Statistics $kind" -a $csvfile $REPORTMAIL <<-EOF
+		Your wanted statistics file '$csvfile'
+		.
+		EOF
+	fi	
+}	
+
+# vim: set filetype=sh noexpandtab tabstop=8 shiftwidth=8 autoindent smartindent :

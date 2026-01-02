@@ -1,0 +1,64 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+# - Blacklist, Master -
+# Run this manually after changes 
+# or from crontab with a short cycle; e.g. 5 minutes
+####################################################################
+#------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../system.conf
+. ../common.conf
+. ../common.bashlib
+#------------------------
+#  Private stuff
+. ../conf/private/$ME.conf
+
+#
+# Fill in local blacklist
+#
+#mk-ipset $MYSET "$SETTYP" "$SETOPTS"
+mk-ipset_lowlevel $MYSET "$SETTYP" "$SETOPTS"
+
+if [ -f $MASTER_PATH/blacklist ]
+then
+	for list in blacklist	# Allows also multiple blacklist.* files
+	do
+	#	LOADFILE=$POOL'/ipset.Loadfile-'$list
+	#	echo "-exist create "list" comment"     > $LOADFILE
+
+#		awk -v list=$list -v loadfile="$LOADFILE" ' 
+		awk	-v setname=$MYSET	\
+			-v settype="$SETTYP" 	\
+			-v setopts="$SETOPTS" 	\
+			-v loadfile="$LOADFILE" '
+		/^$/            { next }
+		/^[ \t]*[#]/    { next }
+				{ IP[$1]=$1 }
+		END {
+			printf "-exist create %s %s %s\n", setname, settype, setopts > loadfile
+
+			for ( ip in IP ) {
+			#	printf "add %s %s comment blacklisted\n", setname, ip > loadfile
+				printf "-exist add %s %s comment blacklisted\n", setname, ip > loadfile
+			}
+		}
+		' $MASTER_PATH/$list
+
+		# Don't flush as this this clears counters on updtes!
+		#	$IPSET flush $MYSET
+			$IPSET -quiet -file $LOADFILE restore
+		
+		logger	 "$ME[$$] Loaded blacklist from '$list' file in $MASTER_PATH ..."
+
+		mk_ip-diffs $list $MASTER_PATH/$list
+	done
+
+else 	echo 	 "$ME: No 'blacklist' file in $MASTER_PATH ..."
+fi
+

@@ -1,0 +1,47 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+####################################################
+# - VPNbreak -
+# Track breakin attempts to openvpn from the
+# openvpn.log
+####################################################
+#------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../system.conf
+. ../watchermap.conf
+. ../common.conf
+. ../common.bashlib
+#------------------------
+
+TMPFILE=$POOL/"$ME".tmp
+
+trap cleanup	0 1 2 9 15
+cleanup() {
+	rm -f $TMPFILE
+}
+
+awk -v tmpfile=$TMPFILE '
+/TLS Error:/	{ 
+			match($0,/([0-9]{1,3}[.]{1}){3}[0-9]{1,3}/)
+			bandit = substr($0,RSTART,RLENGTH)
+			bandits[bandit]++
+		}
+END	{
+		for ( bandit in bandits ) {
+			count = bandits[bandit]
+			printf "%3d, %-s ", count,bandit
+
+			# Treat as a login break-in
+			if ( count > 2 ) {
+				printf "Banning \n" 
+				system("LGinjector "bandit" VPN-Breakin")
+			} else {printf "\n"}	
+		}
+}
+' /var/log/openvpn.log* | sort -V | uniq -cd

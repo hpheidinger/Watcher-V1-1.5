@@ -1,0 +1,103 @@
+#============================================================
+# - api/bash/sql-lite.bashlib -
+# Lightweight SQL API for Watcher-Stats and tools
+#============================================================
+declare -A	sql_parms
+declare -A	sql_result
+
+#------------------------------------------------------------
+# Process SQL command from map
+#	$1 – name of associative array containing:
+#	cmd="SQL statement"
+#------------------------------------------------------------
+procsql() {
+local funtag="[${FUNCNAME[0]}]"
+local	-n map="$1"
+local	dbkey=$2
+local	query="${map[cmd]}"
+local	db sql result header tmp_result
+local	funrc	# Function return code
+local	sqlrc	# SQL return code
+local	tmp access
+local	-u cmdtype
+
+	# Check presense of db-key
+	if [ -z "$dbkey" ]
+	then 	echo "$funtag No DB key - bailing out ..." >&2
+		return 255
+	fi
+
+	db="${DBs[$dbkey]}"
+
+	# Validate db-key
+	if [ -z "$db" ]
+	then	echo "$funtag Unknown DB key '$dbkey'"
+		return 1
+	fi
+
+	# Do we have a query at all ...
+	if [ -z "$query" ]
+	then	echo "$funtag Empty SQL command"
+		return 1
+	fi
+
+	# Determine SQL command type
+	# Pick first word in the query ...
+	cmdtype=$(awk 'NF { print $1; exit }' <<< "$query")
+
+	case $cmdtype in
+		INSERT|UPDATE)	access="W" ;;
+		SELECT)		access="R" ;;
+		DELETE)		access="D" ;;
+		VACUUM)		access="M" ;;
+		*)		access="-"
+				echo "$funtag SQL: '$cmdtype' illegal"
+	;;
+	esac
+
+	# Tell what we did
+	map[cmdtype]=$cmdtype
+	map[access]=$access
+
+	: echo $funtag $db >&2
+
+	sql="sqlite3 --header $db"
+
+	# Clear resultset first of all ...
+	sql_result=()
+
+	# OK ... do the trick ...
+	tmp_result=$($sql "$query" 2>&1)
+	sqlrc=$?
+
+	sql_result[sqlrc]=$sqlrc
+
+	case $sqlrc in
+		0) # SQL SUCCESS
+			case $cmdtype in
+				SELECT)
+					# Header = first line
+					header=$(printf "%s\n" "$tmp_result"	| head -1)
+
+					# Data = everything after header
+					data=$(printf "%s\n" "$tmp_result"	| tail -n +2)
+
+					# result = data only (your semantic contract)
+					sql_result[header]="$header"
+
+					# result = data only (your semantic contract)
+					sql_result[result]="$data"
+				;;
+				*)	# Non-SELECT success → full output (usually empty)
+					sql_result[result]="$tmp_result"
+			;;
+			esac
+		;;
+		*) # SQL ERROR
+			sql_result[error]="$tmp_result"
+		#	sql_result[result]="$tmp_result"	# No redundancies!
+	;;
+	esac
+}
+
+# vim: set filetype=sh noexpandtab tabstop=8 shiftwidth=8 autoindent smartindent :

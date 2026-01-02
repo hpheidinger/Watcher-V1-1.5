@@ -1,0 +1,8 @@
+List are taken from 'https://ipdeny.com/ipblocks'
+
+Prefer the 'aggregated' zone files in
+    https://ipdeny.com/ipblocks/data/aggregated/<xx>-aggregated.zone
+as these subsummarize complete networks in CIDR format.
+
+<xx> is the country code of the list you want
+

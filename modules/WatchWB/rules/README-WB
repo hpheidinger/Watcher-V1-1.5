@@ -1,0 +1,25 @@
+
+For the WEB module 'WatchWB' a rule file is rather a 'set of rules'
+
+The first line in such a 'rule set' is a line setting a variable
+WEB_CLASS: e.g.
+	| WEB_CLASS="Bot"
+	| ###############################
+	|
+This WEB_CLASS is honored by the 'injector' and stored in the database record
+for a detected bandit.
+
+The rest of the rule file  is just a collection of RULE name, Pattern line and
+the 'decision block'
+
+RULE="Name one"
+Pattern="simple string"
+#----------------------
+( ... decision block ... )
+
+RULE="Name two"
+Pattern="yet another simple string"
+#----------------------
+( ... decision block ... )
+
+... and so on ...

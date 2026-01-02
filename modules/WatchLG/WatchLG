@@ -1,0 +1,276 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+# - WatchLG -
+# Watch for login break-in attempts 
+# Record in database ... and inject into firewall
+# after maximum 'affairs' was reached
+#-------------------------------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+#-------- Core stuff -----
+. ../../system.conf
+. ../../watchermap.conf	# needed for debugging
+. ../../common.conf
+. ../../common.bashlib
+#-------- API stuff -------
+. ../../api/bash/sql.bashlib
+#-------- Private stuff ---
+. $ME.conf
+. private.bashlib
+
+: echo $PATH
+
+THIS_IP=`dig +short $HOSTNAME`		# BASH knows HOSTNAME
+
+trap refresh		HUP		# React on a 'HUP' for the filter refresh
+trap stopservice        TERM INT	# React on a 'TERM' or CTL-C when debugging
+trap rerun              KILL 9		# React on crash 
+trap leave		TRAP		# Leave program on serious errors
+trap 'errorexit $? $_'	EXIT
+
+#########################################
+# Trap functions ...
+#########################################
+refresh() {
+local funtag="[${FUNCNAME[0]}]"
+
+	trace	"$funtag Reloading filters for $ME ..."
+	logger  "$ME[$$]: $funtag Reloading filters for $ME ..."
+	load_filter "$funtag `date --iso=seconds`" $COMPRESS_FILTER
+}
+
+errorexit() {
+local funtag="[${FUNCNAME[0]}]"
+
+	logger	"$ME[$$]: $funtag trapped with exit code '$1', Cmd: '$2' ... Loop: $LOOP"
+	trace	"$funtag $ME trapped with exit code '$1', Cmd: '$2' ... Loop: $LOOP"
+	trace	"$funtag BASH Source: $BASH_SOURCE"
+	trace	"$funtag Caller     : $(caller)"
+	trace	"$funtag BASH line 0: ${BASH_LINENO[0]}"
+	trace	"$funtag BASH line 1: ${BASH_LINENO[1]}"
+	trace	"$funtag BASH line 2: ${BASH_LINENO[2]}"
+	exit	255
+}
+
+stopservice() {
+local funtag="[${FUNCNAME[0]}]"
+
+        logger	"$ME[$$]: $funtag Terminating on request ..."
+        trace	"$funtag Terminating on request ..."
+        exit
+}
+
+leave() {
+local funtag="[${FUNCNAME[0]}]"
+local	rc=$?
+local	lastcmd="$BASH_COMMAND"
+local	lineno=${BASH_LINENO[0]}
+
+	trace "$funtag $ME leaving at line $lineno: '$lastcmd' (exit code: $rc)"
+	logger "$ME[$$]: $funtag leaving at line $lineno: '$lastcmd' (exit code: $rc)"
+	exit 254
+}
+
+rerun() {
+local funtag="[${FUNCNAME[0]}]"
+local	token=$(pick_token $ME)
+
+	log     "$ME: $funtag Abnormal termination, exit status: $?, Loop; $LOOP"
+	logger  "$ME[$$]: Restarting in a minute ..."
+	trace	"$funtag $ME Restarting in a minute ..."
+	echo	"Restart $token" | at "now + 1 minute"
+        exit
+}
+
+load_filter() {
+# $1 .. filter status
+# $2 .. compress flag; i.e. compress it not empty
+local funtag="[${FUNCNAME[0]}]"
+
+	unset -f filter
+	[[ -f filter	   	]]  && mv filter filter.old
+	[[ -f filter.compress	]]  && rm -f filter.compress
+
+	./mkfilter $1
+
+	if [ -f filter.old ]
+	then	diff -c filter filter.old > filter-diffs
+	else	[[ -f filter-diffs ]] && rm -f filter-diffs
+	fi
+
+	# If the 'compress filter' flag is set compress filter; 
+	# i.e. remove comments and empty lines for runtime
+	if [ ! -z "$2" ]
+	then	trace "$funtag Using filter compressed"
+		compress_filter
+		. filter.compress
+	else	trace "$funtag Using filter plain"
+		. filter
+	fi
+	
+	# Create/refresh superfluous_map as well
+	SUPERFLUOUS=`mk_superfluous`
+}
+
+
+# ----------------------- Main program ---------------------------
+dump_runtime
+config_table $DB
+
+ln -sf $WHERE/LGinjector $TOOLS_LINK
+
+trace	"--- $ME started on $HOSTNAME ... $SYSTEM $SYSVERS"
+trace	"Watcher: $PRODUCT, $REVISION $1"
+
+if [ -z "$TIME_SLICE" ]; then TIME_SLICE=60; fi
+
+touch $LOG
+chmod 600 $LOG
+touch $ME.trace
+chmod 600 $ME.trace
+
+if [ ! -p $PIPE ]; then mkfifo -m 600 $PIPE; fi
+
+#
+# Load generated 'filter' function
+#
+load_filter initial $COMPRESS_FILTER
+
+#
+# Start scanning ...
+#
+logger	"$ME[$$]: Started listening on pipe $PIPE using dynamic filters"
+log	"Started listening on pipe $PIPE using dynamic filters"
+trace	"Started listening on pipe $PIPE using dynamic filters"
+
+renice -10 $$
+trace "Starting scanner ..."
+while : # Only a crash can stop us 
+do
+
+	[ -e $DB-new ] && pickDB-new
+
+	# Set start conditions for a scanner loop
+	CLASS=''
+	read < $PIPE
+	LOOP_START=`date +%s%3N`
+	read DYN_ADDR < $LOG_DIR/DYN_IP
+	((LOOP++))	# Count loops
+	: echo "--------[ Loop: $LOOP ]----------"
+
+	if [ -z "$REPLY" ]
+	then	: echo "Eeek! Empty line ..."
+		continue
+	fi	
+
+	STAGE="[prepro]"
+	# ------ Pre-Processor (Internal Rule set) --------------
+	# Log lines w/o IP make no sense
+	# » Must come FIRST of all «
+	RULE=IPpresent
+		BANDIT=`get_bandit`
+		if [ -z "$BANDIT" ]
+		then	: trace "[No IP addr] ... skipped"
+			continue
+		fi
+	#
+	# Kick off any junk ...
+	#
+	RULE=Superfluous
+	#	SUPER=`grep -oE "$SUPERFLUOUS" <<< $REPLY`
+	#	if [ ! -z "$SUPER" ]
+		BASH_REMATCH=()
+		[[ "$REPLY" =~ ($SUPERFLUOUS) ]]
+		if [ -n "${BASH_REMATCH[0]}" ]
+		then	: echo "Superfluous stuff ... ignored ..."
+			continue
+		fi
+
+	RULE=Freehost
+		if [[ "$REPLY" =~ "@Freehost:" ]]
+		then
+			DEL_ADDR=`get_bandit`
+			: trace "$ME/$RULE Deleting $DEL_ADDR from $TABLE"
+			freehost $DEL_ADDR
+			continue
+		fi
+
+       	RULE=Self
+		if [[ "$REPLY" =~ "$THIS_IP" ]]
+		then    : trace "$ME/$RULE Oops ... me $THIS_IP"
+			continue
+		fi
+		
+       	RULE=DynIP
+		if [[ "$REPLY" =~ "$DYN_ADDR" ]]
+		then    : trace "$ME/$RULE Oops ... my dyn IP $DYN_ADDR"
+			continue
+		fi
+
+	# Careful here $TRUSTED is a list of IP addresses
+       	RULE=Trusted
+		if [[ "$REPLY" =~ ($TRUSTLIST) ]]
+		then	: trace "$ME/$RULE Oops ... ${BASH_REMATCH[0]} in trusted hosts ... skipping"
+			continue
+		fi
+
+	#--------------------------------------	
+
+	STAGE="[filter]"
+	dump_looprate
+	trace	"[Loop: $LOOP] '$REPLY'"
+	trace	"Debuging: Debug: '$_DEBUG', Trace: '$_TRACE'"
+	
+	FILT_START=`date +%s%3N`
+	filter 		# Returns with $BANDIT, $CLASS, $TAG, $ACTION and $RULE set
+	FILT_RESULT=$?	# Keep retcode save for the post processor
+
+	FILT_END=`date +%s%3N`
+	FILT_TIME=$(( FILT_END-FILT_START ))
+	LOOP_TIME=$(( FILT_END-LOOP_START ))
+
+	STAGE="[postpro]"
+	#
+	# Post processor
+	#
+	case $FILT_RESULT in 
+		0)	trace "[postpro] $RULE ... fall through, $LOOP_TIME/$FILT_TIME ms"
+		;;
+		1)	trace "[postpro] Finished for rule [$RULE], $LOOP_TIME/$FILT_TIME ms"
+			continue
+		;;	
+		2)	trace "[postpro] Handled outside of $ME"
+			continue
+		;;
+		3)	trace "[postpro] $BANDIT whitelisted ... nothing to do ..."
+			continue
+		#====== Return codes 240 ... 255 for internal use only ===========================
+		;;
+		240)	trace "[postpro] Legal login [$RULE] '$Pattern', $LOOP_TIME/$FILT_TIME ms"
+			continue
+		;;
+		241)	trace "[postpro] Debuging set '$Pattern'"
+			continue
+		;;
+		254)	trace "[postpro] Ignored ... [$RULE] '$Pattern', $LOOP_TIME/$FILT_TIME ms"
+			continue
+		;;
+		255)	trace "[postpro] !!! Nasty things happend by rule '$RULE' for '$BANDIT'!!!"
+		;;
+		*)	trace "[postpro] Illegal return code '$FILT_RESULT' ... fall through"
+	;;
+	esac
+
+	#-------------[ Catch all before loop finishes ]-----------
+	RULE=UNTREATED
+		log	"[$RULE] '$REPLY'"
+		trace	"[$RULE] '$REPLY'"
+done
+
+# DEAD-End ... Reaching here triggers a trap that restarts us 
+rerun

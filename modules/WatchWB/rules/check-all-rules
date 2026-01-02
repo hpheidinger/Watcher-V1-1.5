@@ -1,0 +1,2 @@
+#!/bin/bash
+find . -name "*.rule" -exec ./check-rule {} \;

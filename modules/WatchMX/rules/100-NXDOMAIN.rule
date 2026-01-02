@@ -1,0 +1,14 @@
+#
+# - 100-NXDOMAINS.rule -
+# NX domains have not business to do on an MTA
+#
+RULE="NXdomain"
+Pattern=': connect from unknown['
+#---------
+if [[ "$REPLY" =~ "$Pattern" ]]; then CLASS=NXDOMAIN; kickoff; return $?; fi
+
+RULE="NXdomain_after"
+Pattern='after CONNECT from unknown['
+#---------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject; return $?; fi
+

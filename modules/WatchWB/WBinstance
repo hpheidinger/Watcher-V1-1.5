@@ -1,0 +1,144 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;		_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+#############################################################
+#
+# - WBinstance - 
+# Manage web server instances and their type
+#
+#############################################################
+#------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+. ../../system.conf
+. ../../common.conf
+. ../../common.bashlib
+#------------------------
+. private.bashlib
+. WatchWB.conf
+
+TABLE=instances	# override standard TABLE
+
+usage() {
+	echo
+	echo "Usage: $ME [-a <instance name>] [-d <instance ID>] [-l] [-u]"
+	printf "%8s ... %s\n"	"Add"		"-a <instance name>"
+	printf "%8s ... %s\n" 	"Delete"	"-d <instance ID>"
+	printf "%8s ... %s\n" 	"List"		"-l" 
+	printf "%8s ... %s\n"	"Update"	"-u ... (starts a dialog)"
+	exit 1
+}
+
+list() {
+	if [ -z "$1" ]
+	then $SQL -header -column "select * from $TABLE;"
+	else $SQL -header -column "select * from $TABLE where id='$1';"
+	fi
+}
+
+add() {
+local max_id
+local instname=$1
+
+	echo "Adding instance '$instname' ..."
+	max_id=`$SQL "select max(id) from $TABLE;"`
+	(( max_id++ ))
+	$SQL "insert into $TABLE (id, instname) values($max_id,'$instname');"
+
+	list
+}
+
+delete() {
+local	instance_id=$1
+
+	echo "Deleting instance ID '$instance_id' ..."
+	$SQL "delete from $TABLE where id='$instance_id'";
+}
+
+update() {
+local	inst_id
+local	new_name
+local	new_type
+
+	list
+
+	echo "
+	Press ENTER to quit ..."
+	read -p "Which instance id to update? : " inst_id
+	[[ -z "$inst_id" ]] && exit
+	list $inst_id
+
+	echo "
+	Press ENTER to keep ..."
+	read -p "New instance name: " new_name
+	if [ ! -z "$new_name" ]
+	then $SQL "update $TABLE set instname='$new_name' where id='$inst_id';"
+	fi
+	list $inst_id
+
+	echo "
+	Press ENTER to keep ..."
+	read -p "New instance type: " new_type
+	if [ ! -z "$new_type" ]
+	then $SQL "update $TABLE set insttype='$new_type' where id='$inst_id';"
+	fi
+	list 
+}
+
+menu() {
+local	title="$ME ..."
+
+while :
+do
+	clear
+	echo $title
+	list
+	select sel in List Add Delete Update Exit
+	do :
+		case $sel in
+			L*) list
+			;;
+			A*)	list
+				read -p "Instance name to add: "
+				add $REPLY
+				list
+			;;
+			D*)	list
+				read -p "Instance ID to delete: "
+				delete $REPLY
+				list
+			;;
+			U*)	update
+				list
+			;;
+			E*)	exit
+		;;
+		esac
+	done
+done
+}
+
+if [ -z "$*" ]; then usage; exit; fi
+
+while getopts a:d:lui opt
+do
+	case "$opt" in
+		a)	INSTANCE="$OPTARG"
+			add $INSTANCE
+		;;
+        	d)	INSTANCE_ID="$OPTARG"
+			delete $INSTANCE_ID
+		;;
+        	l)	list
+		;;
+		u)	update
+		;;
+		i)	menu
+	;;
+	esac
+done
+shift $((OPTIND-1))

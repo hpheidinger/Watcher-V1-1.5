@@ -1,0 +1,273 @@
+# #####################
+# Private WatchLG stuff
+# #####################
+#
+# Settings & functions private to this module
+#
+
+#
+# - inject -
+# ... is directly called by a 'rule' and the global variable $RULE is set though.
+# The log line is in the global variable $REPLY. So nothing must get passed.
+# All the dirty work is done here.
+#
+inject() {
+local	funtag="[${FUNCNAME[0]}]"
+local   penalty=${1:-1}
+local	retcode=0
+local	affairs
+local	isdropped
+local   haveit this_ip this_state this_affairs this_severity
+
+	trace "$funtag Triggered by rule [$RULE] '$Pattern'"
+
+#	If BANDIT is determined in the preprocessor dont repeat here	
+#	BANDIT=`get_bandit` 
+
+	if ipset -q test whitelist "$BANDIT"
+	then return 3	# Flag whitelisted IP address
+	fi
+
+	validate_IP "$BANDIT"
+	if [ $? -ne 0 ]
+	then
+		trace "$funtag: Junk IP address for bandit '$BANDIT' ... bailing out"
+		return 255
+	fi
+
+	# Determine IP class (NXDOMAIN, FAKEHOST, TRUEHOST))
+	#
+#	CLASS=`get_class $BANDIT`
+	if [ -z $CLASS ]; then  CLASS=`get_class $BANDIT`; fi
+
+	#PORT=`echo "$REPLY" | grep -o 'port [0-9]*' |grep -o '[0-9]*'`
+	#trace "$funtag $CLASS $BANDIT Port: $PORT"
+
+	trace "$funtag $CLASS $BANDIT"
+
+       	#
+	# OK ... 'observed' or 'new' candidate ??
+	#
+
+	sql_track=()
+	sql_track[cmd]="
+        	select IP,state,affairs,severity from $TABLE where IP='$BANDIT'
+		;"
+	exec_sql sql_track
+	
+	haveit=${resultset[IP]}
+	: echo "============== [haveit] = "$haveit" ==============="
+
+#	if [ -n "$haveit" ]
+#	then IFS='|' read -r this_ip this_state this_affairs this_severity <<< "$haveit"
+#	fi
+
+	this_ip=${resultset[IP]}
+	this_state=${resultset[state]}
+	this_affairs=${resultset[affairs]}
+	this_severity=${resultset[severity]}
+
+	if [ -z "$haveit" ] 
+	then 	#
+		# Introduce the bandit (insert in to database)
+		#
+		# Note:
+		# NXDOMAINs & FAKEHOSTS are killed on 2nd attempt; i.e. they get 'MAX_AFFAIRS - 1'
+		# on 1st attempt. The first attempt is needed to detect and identify the bandit
+		#
+		if [[ "NXDOMAIN FAKEHOST" =~ $CLASS ]]
+#		then penalty=$((MAX_AFFAIRS - 1))
+#		then penalty=$MAX_AFFAIRS
+		then kickoff; return 1
+		fi
+
+		affairs=$penalty
+
+		# Fix IPSET first off all.
+		$IPSET -exist add tarpit $BANDIT timeout $((2**affairs * TIME_SLICE)) comment "tarpit,$THIS_TYPE,$affairs"
+
+		STATE=INTRO
+		ACTION="Initial $affairs/$MAX_AFFAIRS, Penalty: $penalty"
+
+		if [ -n "$GEOTRACK" ]; then do_geotrack $BANDIT $ME $funtag; fi
+
+		sql_track=()
+	    	sql_track[cmd]="
+			insert into $TABLE
+				(origin,IP,affairs,type,state,initiator,rule,
+				date_intro,date_event,class,comment)
+			values 	('$ME','$BANDIT',$affairs,'$THIS_TYPE','$STATE','$funtag','$RULE',
+				datetime(current_timestamp, 'localtime'),
+				datetime(current_timestamp, 'localtime'),
+				'$CLASS','$THIS_TYPE,$CLASS')
+			;"
+		exec_sql sql_track
+
+		retcode=1
+	else
+		# Already got a DROP?
+		# If so kick to bin permanently
+		isdropped=$this_state
+		if [ -n "$isdropped" ]
+		then
+			trace "$funtag DROPed culprit $BANDIT re-occured ... taken into custody"
+			$IPSET -exist add custody $BANDIT comment "custody-$funtag,$THIS_TYPE,$CLASS"
+			return 1	# Take the short way out ...
+                fi
+
+		#
+		# ... A known bandit (UPDATE)
+		#
+		affairs=$this_affairs
+
+		if [ $affairs -lt $MAX_AFFAIRS ]
+		then
+		   	((affairs++))
+
+			# Fix IPset first of all ...
+			$IPSET -exist add tarpit $BANDIT timeout $((2**affairs * TIME_SLICE)) comment "tarpit,$THIS_TYPE,$affairs"
+
+			STATE=COUNT
+			ACTION="Count   $affairs/$MAX_AFFAIRS"
+
+			sql_track=()
+			sql_track[lineo]=$LINENO
+			sql_track[cmd]="
+				update $TABLE set
+					affairs		= $affairs, 
+					class		= '$CLASS', 
+					state		= '$STATE',
+					comment		= '$THIS_TYPE,$ACTION',
+					initiator	= '$funtag',
+					origin		= '$ME',
+					rule		= '$RULE',
+					date_event	= datetime(current_timestamp, 'localtime')
+				where IP='$BANDIT'
+				;"
+			exec_sql sql_track
+
+			retcode=1
+
+		else 	# Mark a DROP in the database drop if MAX_AFFAIRS is reached ...
+			
+			# Fix IPset first of all ...
+			$IPSET -exist add tarpit $BANDIT timeout $((2**affairs * TIME_SLICE)) comment "tarpit,$THIS_TYPE,$affairs"
+			
+			STATE=DROP
+			ACTION="Dropped @ $affairs"
+
+			sql_track=()
+			sql_track[cmd]="
+				update $TABLE set
+					affairs		= $affairs,
+					state		= '$STATE',
+					class		= '$CLASS',
+					rule		= '$RULE', 
+					comment		= '$THIS_TYPE,$CLASS',
+					initiator	= '$funtag',
+					origin		= '$ME',
+					date_event	= datetime(current_timestamp, 'localtime')
+				where IP='$BANDIT'
+				;"
+			exec_sql sql_track	
+			
+			retcode=1
+		fi
+    fi
+
+	write_affairs $BANDIT $affairs $RULE
+
+	#log	"$funtag $CLASS $BANDIT '$ACTION'"
+	clog	"$funtag" "$CLASS" "$BANDIT" "'$ACTION'"
+	trace	"$funtag $CLASS $BANDIT '$ACTION'"
+	
+	return $retcode
+}
+
+
+write_affairs() {
+local funtag="[${FUNCNAME[0]}]"
+local	useconds=`date +%s%6N`	
+	sql_track=()
+	sql_track[cmd]="
+		insert into affairs_by_ip (ip_addr, affair_num, rule, event_date, time_useconds)
+		values ('$1',$2,'$3', datetime(current_timestamp,'localtime'), $useconds)
+		;"
+	exec_sql sql_track	
+}
+
+#
+# kick-off for the LG module
+#
+kickoff() {
+local funtag="[${FUNCNAME[0]}]"
+local	penalty=$MAX_AFFAIRS
+local	affairs=$penalty
+local	class=${CLASS:=KICKOFF}
+local	action
+local	comment="$THIS_TYPE,$CLASS"
+local	state=DROP	# We always drop immediatetly ...
+local	haveit
+
+	# View values from the filter
+	trace "$funtag $BANDIT, [$RULE], '$Pattern'"
+
+	# Put into custody first ..
+	ipset -exist add custody $BANDIT comment "custody-$funtag,$THIS_TYPE,$class"
+
+	# ... then nail it into the database
+	sql_track=()
+	sql_track[cmd]="
+		select IP from $TABLE where IP='$BANDIT'
+		;"
+	exec_sql sql_track
+
+	haveit=${resultset[IP]}
+	: echo "============== [haveit] = "$haveit" ==============="
+
+	# Done exec_sql
+	#if	[ ${sql_track[rc]} -eq 0 ]
+	#then	declare ${sql_track[variable]}="${sql_track[result]}"
+	#fi
+
+	if [ -z "$haveit" ]
+	then
+		if [ -n "$GEOTRACK" ]; then do_geotrack $BANDIT $ME $funtag; fi
+
+		action="$funtag $affairs/$MAX_AFFAIRS, Penalty: $penalty"
+		
+		sql_track=()
+		sql_track[cmd]="
+			insert into $TABLE
+				(origin,IP,rule,class,state,initiator,affairs,
+				type,comment,date_intro,date_event)
+			values ('$ME','$BANDIT','$RULE','$CLASS','$state',
+				'$funtag',$affairs,'$THIS_TYPE','$comment',
+				datetime(current_timestamp,'localtime'),
+				datetime(current_timestamp,'localtime') )
+			;"
+		exec_sql sql_track
+	else
+		action="$funtag $affairs/$MAX_AFFAIRS"
+
+		sql_track=()
+		sql_track[cmd]="
+			update $TABLE set
+				origin		= '$ME',
+				affairs		= $affairs,
+				class		= '$CLASS',
+				state		= '$state',
+				initiator	= '$funtag',
+				rule		= '$RULE',
+				date_event	= datetime(current_timestamp,'localtime')
+			where	IP = '$BANDIT'
+			;"
+		exec_sql sql_track
+	fi
+
+	clog    "$funtag" "$CLASS" "$BANDIT" "'$ACTION'" 
+	return	1        # Let post processor know
+}
+
+# vim: set filetype=sh noexpandtab tabstop=8 shiftwidth=8 autoindent smartindent :
+

@@ -1,0 +1,50 @@
+-- Watcher-Stats.schema – Schema for Watcher global statistics
+
+CREATE TABLE IF NOT EXISTS stats_summary (
+	db_init		DATE,
+	event_stamp	DATE
+);
+
+CREATE TABLE IF NOT EXISTS efficiency_stats (
+	event_stamp		DATE
+				DEFAULT (datetime(current_timestamp,'localtime')),
+	origin			TEXT NOT NULL,
+	active			BOOLEAN,
+	eff_cur			REAL,
+	eff_min			REAL,
+	eff_max			REAL
+);
+
+CREATE TABLE IF NOT EXISTS looprates_stats (
+	event_stamp		DATE
+				DEFAULT (datetime(current_timestamp,'localtime')),
+	origin			TEXT NOT NULL,	-- Processor that generated this
+	module			TEXT NOT NULL,	-- ... and for which module
+	active			BOOLEAN,
+	records			INTEGER,
+	loop_min		INTEGER,
+	loop_max		INTEGER,
+	loop_avg		INTEGER,
+	loop_med		INTEGER,
+	loop_std		INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS rates_stats (
+	event_stamp		DATE
+				DEFAULT (datetime(current_timestamp,'localtime')),
+	origin			TEXT NOT NULL,	-- Processor that generated this
+	module			TEXT NOT NULL,	-- ... and for which module
+	active			BOOLEAN,
+	records			INTEGER,
+	rate_loop_min		REAL,
+	rate_loop_max		REAL,
+	rate_loop_avg		REAL,
+	rate_loop_med		REAL,
+	rate_loop_procs		REAL,
+	rate_filter_min		REAL,
+	rate_filter_max		REAL,
+	rate_filter_avg		REAL,
+	rate_filter_med		REAL,
+	rate_filter_proc	REAL
+);
+

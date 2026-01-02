@@ -1,0 +1,6 @@
+# Attempt of pushing to illegal mailbox
+RULE='NOQUEUE'
+Pattern=': NOQUEUE: reject:'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject; return $?; fi
+

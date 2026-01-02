@@ -1,0 +1,85 @@
+#!/bin/bash
+### BEGIN INIT INFO
+# Provides: Watcher service (SysV-style)
+# Required-Start: $iptables
+# Required-Stop:
+# Default-Start:  2 3 5
+# Default-Stop:   0 1 2 6
+# Description:    Start watcher service (SysV-style)
+### END INIT INFO
+
+#----- Positioning ------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+#------------------------
+export WATCHER_MODE=startup
+. system.conf
+. watcher.conf
+
+SERVICE=watcher
+# Where did the installtion put me ...
+MASTER_PATH=$WHERE
+
+do_start() {
+local funtag="[${FUNCNAME[0]}]"
+        echo "$funtag Starting service $SERVICE with kernel firewall '$FIREWALL' ... "
+	cd $MASTER_PATH && ./$SERVICE
+        echo "[OK]"
+}
+
+do_stop() {
+local funtag="[${FUNCNAME[0]}]"
+local	rd_device=$(df | grep ramdisk| grep Watcher| awk '{print $1}')
+local	umounttries=5
+
+	echo "$funtag Shutting down service $SERVICE ... "
+	for mod in `echo $MASTER_PATH/modules/*`
+	do
+		MODNAME=`basename $mod`
+		echo "$SERVICE: Shutting down module $MODNAME ..."
+		killall -TERM $MODNAME >/dev/null 2>&1
+	done
+
+	if [ -n "$USE_RAMDISK" ]
+	then
+		if df | grep $rd_device >/dev/null 2>&1
+		then	echo "Un-mounting RAMdisk $rd_device ..."
+			umount -l $rd_device
+			sleep 1
+		fi
+	fi
+
+        echo "[OK]"
+}
+
+case "$1" in
+    start)	do_start
+    ;;
+    stop)	do_stop
+    ;;
+    restart)	do_stop  && do_start
+    ;;
+    reload)	echo "... Restarting firewall service '$FIREWALL'..."
+		case $FIREWALL in
+			iptables)	service $IPTABLES_SERVICE stop
+					ipset destroy
+					service $IPTABLES_SERVICE start
+			;;
+			nftables)	service nftables restart
+			;;
+			firewalld)	echo "'firewalld' and other wrappers are NOT supported!'"
+			;;
+			*)		echo "No firewall is configured. Run '.Prep' in $MASTER_PATH"
+		;;
+		esac
+		ipset flush
+    		echo "... Restarting watcher service ..."
+    		do_stop  && do_start
+    ;;
+    *)		 echo "Usage: $SERVICE { start | stop | restart | reload }"
+;;
+esac
+
+exit 0

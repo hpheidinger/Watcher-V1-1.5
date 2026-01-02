@@ -1,0 +1,8 @@
+WEB_CLASS=Fake-Request
+RULE=Double-Dash
+Pattern="GET /en/produkte/"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+
+

@@ -1,0 +1,5 @@
+RULE=root-login
+Pattern=': Failed password for root'
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject 3; return $?; fi
+

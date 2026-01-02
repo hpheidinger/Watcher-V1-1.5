@@ -1,0 +1,26 @@
+# - Template rule -
+# Remove this heading for production
+#
+# Beginning with revision 1.3 'Pattern' is no longer a REGEX
+# but a simple string and the decision block is a 'one-liner'
+#
+# Take into account, that the leading numbers (3 digits) provide 
+# a means to give rules an order/priority, since sometimes the order counts.
+# Have 'more specific' rules BEFORE 'more common' rules. 
+# e.g.:
+#
+#	Pattern='Anonymous TLS connection established from unknown['
+#	Pattern='connection established from unknown['
+#	Pattern='connect from unknown['
+#
+# Give it a '.rule' extension to set it into production
+#
+# Use 'check-rule' & 'check-all-rules' on new or changed rule files
+# before the Watcher service is restarted.
+#
+
+RULE="A rule name here"
+Pattern='... a pattern to match the log line ...'
+#--------- Decision -----------
+if [[ "$REPLY" =~ "$Pattern" ]]; then inject; return $?; fi
+

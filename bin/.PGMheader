@@ -1,0 +1,22 @@
+#!/bin/bash
+if [[ "$1" == 'debug'  ]]; then set -x;a	_DEBUG=$1; shift; fi
+if [[ "$1" == 'debug2' ]]; then set -xvT;	_DEBUG=$1; shift; fi
+if [[ "$1" == 'trace'  ]]; then 		_TRACE=$1; shift; fi
+####################################################################
+# - __PROGRAM_NAME__ -
+# __short_description__
+####################################################################
+#------------------------
+REALPATH=`realpath $0`
+WHERE=`dirname $REALPATH`
+ME=`basename $REALPATH`
+cd $WHERE
+#--- Core stuff ------
+. ../system.conf
+. ../watchermap.conf
+. ../common.conf
+. ../common.bashlib
+#--- API stuff ------
+# e.g. . ../api/bash/XXXX.bashlib
+#--- Private stuff ------
+# e.g.	private.bashlib
