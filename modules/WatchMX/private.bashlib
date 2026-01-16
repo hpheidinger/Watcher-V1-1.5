@@ -78,7 +78,7 @@ local	haveit this_ip this_state this_affairs this_severity this_class
 		affairs=$penalty
 
 		# First drop into the IPset ...
-		$IPSET -exist add tarpit $BANDIT timeout $((2**affairs * TIME_SLICE)) comment "tarpit,$THIS_TYPE,$affairs"
+		ipset -exist add tarpit $BANDIT timeout $((2**affairs * TIME_SLICE)) comment "tarpit,$THIS_TYPE,$affairs"
 
 		STATE='INTRO'
 		ACTION="Initial $affairs/$MAX_AFFAIRS, Penalty: $penalty"
@@ -100,7 +100,7 @@ local	haveit this_ip this_state this_affairs this_severity this_class
 		# Already known and DROPed?
 		if [ "$this_state" == 'DROP' ]
 		then
-			$IPSET -exist add custody $BANDIT comment "custody-$funtag,$THIS_TYPE,$CLASS"
+			ipset -exist add custody $BANDIT comment "custody-$funtag,$THIS_TYPE,$CLASS"
 			trace "$funtag DROPed culprit $BANDIT re-occured ... taken into custody ..."
 			return 1	# short way out
 		fi
@@ -115,7 +115,7 @@ local	haveit this_ip this_state this_affairs this_severity this_class
 			((affairs++))
 
 			# IPset first ... before DB action
-			$IPSET -exist add tarpit $BANDIT timeout $((2**affairs * TIME_SLICE)) comment "tarpit,$THIS_TYPE,$affairs"
+			ipset -exist add tarpit $BANDIT timeout $((2**affairs * TIME_SLICE)) comment "tarpit,$THIS_TYPE,$affairs"
 
 			STATE='COUNT'
 			ACTION="Count   $affairs/$MAX_AFFAIRS"
@@ -139,7 +139,7 @@ local	haveit this_ip this_state this_affairs this_severity this_class
 			affairs=$this_affairs
 			
 			# IPset first ... before DB update
-			$IPSET -exist add tarpit $BANDIT timeout $((2**affairs * TIME_SLICE)) comment "tarpit,$THIS_TYPE,$affairs"
+			ipset -exist add tarpit $BANDIT timeout $((2**affairs * TIME_SLICE)) comment "tarpit,$THIS_TYPE,$affairs"
 
 			STATE='DROP'
 			ACTION="Dropped @ $affairs"

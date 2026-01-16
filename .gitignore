@@ -6,6 +6,7 @@ Test*/
 filter/
 DROP*/
 dynload/geo/zones/
+dynload/geo/MD5SUM
 blacklist
 whitelist
 
@@ -24,6 +25,14 @@ system.conf
 *asndrop.*
 nixspam*.gz
 
+# Genrated stuff
+*filter
+*filter-*
+*filter.*
+*ruleset-*
+*WBanalyse-*
+
 # Statistic files
 Statistics*.csv
+Watcher-Stats-*.csv
 

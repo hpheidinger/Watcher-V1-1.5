@@ -59,3 +59,48 @@ Pattern="GET /css/"
 #---------------
 if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
 
+RULE=shell
+Pattern="GET /shell"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=webshell
+Pattern="GET /webshell"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=adminer
+Pattern="GET /adminer.php"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=bless14
+Pattern="GET /bless14.php"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=ihr-kunden-profil
+Pattern="GET /ihr-kunden-profil"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=Well-known
+Pattern="GET /.well.known/"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=ioxi-o
+Pattern="GET /ioxi-o.php/"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=0x
+Pattern="GET /0x.php/"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+
+RULE=222_php_crap
+Pattern="GET /220.php/"
+#---------------
+if [[ "$REPLY" =~ "$Pattern" ]]; then kickoff; return $?; fi
+

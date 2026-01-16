@@ -4,8 +4,8 @@
 #
 ruleset-joomla() {
 local funtag="[${FUNCNAME[0]}]"
-: FILTER_STATE=Initial
-: FILTER_DATE=2025-12-30T01:53:16+01:00
+: FILTER_STATE=[refresh]
+: FILTER_DATE=2026-01-03T18:15:49+01:00
 WEB_CLASS=Exploits
 RULE=Exploit-wp-login
 Pattern="wp-login.php"

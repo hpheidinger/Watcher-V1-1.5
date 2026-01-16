@@ -4,7 +4,7 @@
 #
 filter() {
 : FILTER_STATE=Initial
-: FILTER_DATE=2025-12-28T23:12:30+01:00
+: FILTER_DATE=2026-01-16T17:08:01+01:00
 local debugs="@nodebug|@notrace|@alloff|@debug|@debug2|@trace"
 local debfun
 
