@@ -24,7 +24,7 @@ cd $WHERE
 . ../../common.conf
 . ../../common.bashlib
 #----- API stuff ----------------------
-. ..api/bash/sql.bashlib
+. ../../api/bash/sql.bashlib
 #----- Private stuff ------------------
 . ../WatchMX/WatchMX.conf	# Listen to mother's voice
 . ../WatchMX/private.bashlib
